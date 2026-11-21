@@ -40,6 +40,7 @@ class GamificationManager:
     def _default_state(self) -> dict:
         return {
             "points": 0,
+            "points_this_week":0,
             "streak": 0,
             "weekly_goal": 3,
             "goal_set_for_week": None,
@@ -134,6 +135,7 @@ class GamificationManager:
 
         self.state["active_week"] = now_week
         self.state["completed_this_week"] = 0
+        self.state["points_this_week"] = 0
         self.save_state()
         return "\n".join(messages)
 
@@ -162,6 +164,7 @@ class GamificationManager:
             msg += f"\n📉 Zmiana ligi: {old_league} → {new_league}!"
 
         self.state["completed_this_week"] = 0
+        self.state["points_this_week"] = 0
         self.save_state()
         return msg
 
@@ -177,6 +180,7 @@ class GamificationManager:
 
         self.state["rewarded_tasks"].append(signature)
         self.state["points"] += earned
+        self.state["points_this_week"] = self.state.get("points_this_week", 0) + earned
         self.state["completed_this_week"] += 1
         self.save_state()
 
@@ -188,3 +192,12 @@ class GamificationManager:
             feedback += "  |  🎯 Cel tygodniowy osiągnięty!"
 
         return earned, feedback
+
+    def reset_weekly_progress(self) -> None:
+        """Resetuje postęp i punkty z bieżącego tygodnia przy wczytaniu nowej listy zadań."""
+        weekly_pts = self.state.get("points_this_week", 0)
+        self.state["points"] = max(0, self.state["points"] - weekly_pts)
+        self.state["points_this_week"] = 0
+        self.state["completed_this_week"] = 0
+        self.state["rewarded_tasks"] = []
+        self.save_state()

@@ -4,6 +4,7 @@ from tkinter import filedialog, messagebox
 from storage import load_tasks, save_tasks
 from smart import parse_quick_add, get_smart_focus_task, is_overdue
 from gamification import GamificationManager, PRIORITY_POINTS
+from datetime import date
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -140,9 +141,24 @@ class SmartPlannerApp(ctk.CTk):
         super().__init__()
         self.geometry("1000x740")
 
-        self.current_file: str | None = None
-        self.data = {"wersja": 1, "zadania": []}
+        base_dir = Path(__file__).resolve().parent
+        default_path = base_dir / "zadania.json"
+        if default_path.exists():
+            try:
+                self.data = load_tasks(default_path)
+                self.current_file = str(default_path)
+            except Exception:
+                self.data = {"wersja": 1, "zadania": []}
+                self.current_file = None
+        else:
+            self.data = {"wersja": 1, "zadania": []}
+            self.current_file = None
         self.filter_mode = ctk.StringVar(value="Wszystkie")
+        self.search_var = ctk.StringVar(value="")
+        self.search_var.trace_add("write", lambda *_: self.refresh_ui())
+        self.prio_filter_var = ctk.StringVar(value="Priorytet: Wszystkie")
+        self.date_filter_var = ctk.StringVar(value="Termin: Wszystkie")
+        self.tag_filter_var = ctk.StringVar(value="Tag: Wszystkie")
         self.gamification = GamificationManager()
         self.last_event_text = "Wykonuj zadania z wyprzedzeniem (niski = 5 pkt, średni = 4 pkt, wysoki = 3 pkt)."
 
@@ -191,7 +207,19 @@ class SmartPlannerApp(ctk.CTk):
             variable=self.filter_mode,
             command=lambda _: self.refresh_ui(),
         ).pack(side="right", padx=12)
-
+        #Pasek z datą
+        dni_tyg = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+        dzis = date.today()
+        _, nr_tygodnia, _ = dzis.isocalendar()
+        date_text = f"📅 Dzisiaj: {dni_tyg[dzis.weekday()]}, {dzis.strftime('%d.%m.%Y')}  |  Tydzień #{nr_tygodnia}"
+        date_bar = ctk.CTkFrame(self, height=30, fg_color="#16202a")
+        date_bar.pack(fill="x", padx=15, pady=(0, 4))
+        ctk.CTkLabel(
+            date_bar,
+            text=date_text,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#85c1e9",
+        ).pack(side="left", padx=12, pady=4)
         # Panel Grywalizacji: Liga Systematyczności + Tygodniowy Cel + Streak
         league_card = ctk.CTkFrame(self, fg_color="#1b2631", border_width=1, border_color="#2c3e50")
         league_card.pack(fill="x", padx=15, pady=6)
@@ -298,7 +326,56 @@ class SmartPlannerApp(ctk.CTk):
         self.quick_entry.bind("<Return>", lambda _: self.add_task())
 
         ctk.CTkButton(add_bar, text="+ Dodaj", width=100, height=38, command=self.add_task).pack(side="right", padx=(0, 10))
+        # Pasek wyszukiwania na żywo i filtrowania po wszystkich parametrach
+        filter_bar = ctk.CTkFrame(self, fg_color="#1b2631")
+        filter_bar.pack(fill="x", padx=15, pady=(2, 6))
 
+        self.search_entry = ctk.CTkEntry(
+            filter_bar,
+            textvariable=self.search_var,
+            placeholder_text="🔍 Szukaj po tytule, opisie, ID, dacie lub #tagu...",
+            height=32,
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(10, 6), pady=8)
+
+        self.prio_filter_menu = ctk.CTkOptionMenu(
+            filter_bar,
+            values=["Priorytet: Wszystkie", "wysoki", "sredni", "niski"],
+            variable=self.prio_filter_var,
+            width=155,
+            height=32,
+            command=lambda _: self.refresh_ui(),
+        )
+        self.prio_filter_menu.pack(side="left", padx=4, pady=8)
+
+        self.date_filter_menu = ctk.CTkOptionMenu(
+            filter_bar,
+            values=["Termin: Wszystkie", "Na dziś", "Po terminie", "Z terminem", "Bez terminu (null)"],
+            variable=self.date_filter_var,
+            width=165,
+            height=32,
+            command=lambda _: self.refresh_ui(),
+        )
+        self.date_filter_menu.pack(side="left", padx=4, pady=8)
+
+        self.tag_filter_menu = ctk.CTkOptionMenu(
+            filter_bar,
+            values=["Tag: Wszystkie"],
+            variable=self.tag_filter_var,
+            width=145,
+            height=32,
+            command=lambda _: self.refresh_ui(),
+        )
+        self.tag_filter_menu.pack(side="left", padx=4, pady=8)
+
+        ctk.CTkButton(
+            filter_bar,
+            text="✕ Reset",
+            width=70,
+            height=32,
+            fg_color="#5d6d7e",
+            command=self.reset_filters,
+        ).pack(side="left", padx=(4, 10), pady=8)
         # Lista zadań
         self.task_list_frame = ctk.CTkScrollableFrame(self)
         self.task_list_frame.pack(fill="both", expand=True, padx=15, pady=(6, 15))
@@ -348,13 +425,35 @@ class SmartPlannerApp(ctk.CTk):
         path = filedialog.askopenfilename(filetypes=[("Pliki JSON", "*.json")])
         if not path:
             return
+
+        has_existing_state = (
+            self.current_file is not None
+            or len(self.data.get("zadania", [])) > 0
+            or self.gamification.state.get("completed_this_week", 0) > 0
+        )
+        if has_existing_state:
+            confirmed = messagebox.askyesno(
+                "Reset postępu tygodniowego",
+                "Wczytanie nowej listy zadań usunie Twój postęp z bieżącego tygodnia "
+                "(licznik wykonanych zadań oraz punkty zdobyte w tym tygodniu), "
+                "aby zapobiec wielokrotnemu punktowaniu tych samych zadań.\n\n"
+                "Czy na pewno chcesz wczytać nowy plik?",
+                parent=self,
+            )
+            if not confirmed:
+                return
+
         try:
-            self.data = load_tasks(path)
-            self.current_file = path
-            self.last_event_text = f"Wczytano plik: {Path(path).name} ({len(self.data['zadania'])} zadań)."
-            self.refresh_ui()
+            new_data = load_tasks(path)
         except Exception as e:
-            messagebox.showerror("Błąd wczytywania", f"Nie udało się wczytać pliku:\n{e}")
+            messagebox.showerror("Błąd wczytywania", f"Nie udało się wczytać pliku:\n{e}", parent=self)
+            return
+
+        self.data = new_data
+        self.current_file = path
+        self.gamification.reset_weekly_progress()
+        self.last_event_text = f"Wczytano nową listę ({Path(path).name}) — postęp tygodniowy został wyzerowany."
+        self.refresh_ui()
 
     def save_current_json(self):
         if not self.current_file:
@@ -376,11 +475,17 @@ class SmartPlannerApp(ctk.CTk):
         self.refresh_ui()
         messagebox.showinfo("Zapisano", f"Wyeksportowano zadania do:\n{path}")
 
+    def reset_filters(self):
+        self.filter_mode.set("Wszystkie")
+        self.prio_filter_var.set("Priorytet: Wszystkie")
+        self.date_filter_var.set("Termin: Wszystkie")
+        self.tag_filter_var.set("Tag: Wszystkie")
+        self.search_var.set("")
     def refresh_ui(self):
         file_status = Path(self.current_file).name if self.current_file else "Brak wczytanego pliku"
         self.title(f"SmartApp — {file_status} (zadań: {len(self.data['zadania'])})")
 
-        # Odśwież panel grywalizacji
+        # 1. Odśwież panel grywalizacji (Liga, Punkty, Streak, Cel tygodniowy)
         st = self.gamification.state
         league = self.gamification.get_league_info()
         self.league_badge.configure(text=f"🏆 LIGA: {league['name'].upper()}", fg_color=league["color"])
@@ -398,7 +503,7 @@ class SmartPlannerApp(ctk.CTk):
         self.goal_progress_bar.set(min(1.0, done_wk / goal_wk))
         self.gami_status_label.configure(text=self.last_event_text)
 
-        # Odśwież Smart Focus
+        # 2. Odśwież kartę Smart Focus
         best_task, reason = get_smart_focus_task(self.data["zadania"])
         if best_task:
             self.focus_label.configure(text=f"SMART FOCUS: {best_task['tytul']}\nPowód: {reason}")
@@ -407,12 +512,29 @@ class SmartPlannerApp(ctk.CTk):
             self.focus_label.configure(text=f"SMART FOCUS: {reason}")
             self.focus_done_btn.configure(state="disabled")
 
-        # Wyczyść listę
+        # 3. Dynamiczna aktualizacja listy dostępnych tagów w menu filtrowania
+        all_tags = sorted({tag for task in self.data["zadania"] for tag in task.get("tagi", [])})
+        tag_options = ["Tag: Wszystkie"] + [f"#{tag}" for tag in all_tags]
+        self.tag_filter_menu.configure(values=tag_options)
+        if self.tag_filter_var.get() not in tag_options:
+            self.tag_filter_var.set("Tag: Wszystkie")
+
+        # 4. Wyczyść obecną listę kart zadań
         for widget in self.task_list_frame.winfo_children():
             widget.destroy()
 
+        # 5. Pobierz aktywne kryteria filtrowania
         mode = self.filter_mode.get()
+        prio_filter = self.prio_filter_var.get()
+        date_filter = self.date_filter_var.get()
+        tag_filter = self.tag_filter_var.get()
+        query = self.search_var.get().strip().lower()
+        today_str = date.today().isoformat()
+        shown_count = 0
+
+        # 6. Filtruj i renderuj zadania
         for t in self.data["zadania"]:
+            # Filtr statusu (wykonane / po terminie)
             if mode == "Do zrobienia" and t["wykonane"]:
                 continue
             if mode == "Zrobione" and not t["wykonane"]:
@@ -420,6 +542,45 @@ class SmartPlannerApp(ctk.CTk):
             if mode == "Po terminie" and not is_overdue(t):
                 continue
 
+            # Filtr priorytetu
+            if prio_filter != "Priorytet: Wszystkie" and t.get("priorytet") != prio_filter:
+                continue
+
+            # Filtr terminu
+            termin_val = t.get("termin")
+            if date_filter == "Na dziś" and termin_val != today_str:
+                continue
+            if date_filter == "Po terminie" and not is_overdue(t):
+                continue
+            if date_filter == "Z terminem" and not termin_val:
+                continue
+            if date_filter == "Bez terminu (null)" and termin_val is not None:
+                continue
+
+            # Filtr tagu
+            if tag_filter != "Tag: Wszystkie":
+                clean_tag = tag_filter.lstrip("#")
+                if clean_tag not in t.get("tagi", []):
+                    continue
+
+            # Wyszukiwarka na żywo (id, tytul, opis, termin, priorytet, tagi)
+            if query:
+                q_no_hash = query.lstrip("#")
+                searchable = " ".join([
+                    f"id:{t.get('id', '')}",
+                    str(t.get("id", "")),
+                    t.get("tytul", "").lower(),
+                    t.get("opis", "").lower(),
+                    str(termin_val or "").lower(),
+                    t.get("priorytet", "").lower(),
+                    " ".join(t.get("tagi", [])).lower(),
+                ])
+                if query not in searchable and q_no_hash not in searchable:
+                    continue
+
+            shown_count += 1
+
+            # Karta pojedynczego zadania
             card = ctk.CTkFrame(self.task_list_frame)
             card.pack(fill="x", pady=4, padx=4)
 
@@ -445,10 +606,10 @@ class SmartPlannerApp(ctk.CTk):
             ).pack(anchor="w")
 
             pts_value = PRIORITY_POINTS.get(t["priorytet"], 4)
-            meta_parts = [f"Priorytet: {t['priorytet'].upper()} (+{pts_value} pkt)"]
-            if t.get("termin"):
+            meta_parts = [f"ID: #{t['id']}", f"Priorytet: {t['priorytet'].upper()} (+{pts_value} pkt)"]
+            if termin_val:
                 overdue_tag = " [PO TERMINIE]" if is_overdue(t) else ""
-                meta_parts.append(f"Termin: {t['termin']}{overdue_tag}")
+                meta_parts.append(f"Termin: {termin_val}{overdue_tag}")
             if t.get("tagi"):
                 meta_parts.append("Tagi: " + ", ".join(f"#{tag}" for tag in t["tagi"]))
             if t.get("opis"):
@@ -486,6 +647,14 @@ class SmartPlannerApp(ctk.CTk):
                 width=65,
                 command=lambda task=t: self.edit_task(task),
             ).pack(side="right", padx=4)
+
+        if shown_count == 0:
+            ctk.CTkLabel(
+                self.task_list_frame,
+                text="Brak zadań spełniających wybrane kryteria filtrowania.",
+                font=ctk.CTkFont(size=14),
+                text_color="#888888",
+            ).pack(pady=30)
 
 
 if __name__ == "__main__":
