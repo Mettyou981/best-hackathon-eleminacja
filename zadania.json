@@ -1,0 +1,16 @@
+{
+  "wersja": 1,
+  "zadania": [
+    {
+      "id": 1,
+      "tytul": "Kolokwium z sieci komputerowych",
+      "opis": "Rozdziały 3–5",
+      "termin": "2026-11-18",
+      "priorytet": "wysoki",
+      "wykonane": false,
+      "tagi": [
+        "studia"
+      ]
+    }
+  ]
+}

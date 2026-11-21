@@ -1,0 +1,113 @@
+{
+  "wersja": 1,
+  "zadania": [
+    {
+      "id": 1,
+      "tytul": "Oddanie zadania eliminacyjnego SmartApp",
+      "opis": "Wrzucenie kodu na publiczny GitHub, uzupełnienie README.md i nagranie 2-minutowego wideo",
+      "termin": "2026-11-22",
+      "priorytet": "wysoki",
+      "wykonane": false,
+      "tagi": ["hackathon", "projekt"]
+    },
+    {
+      "id": 2,
+      "tytul": "Kolokwium z systemów operacyjnych",
+      "opis": "Zarządzanie pamięcią, zakleszczenia i szeregowanie procesów",
+      "termin": "2026-11-19",
+      "priorytet": "wysoki",
+      "wykonane": false,
+      "tagi": ["studia", "kolokwium"]
+    },
+    {
+      "id": 3,
+      "tytul": "Sprawozdanie z laboratoriów sieciowych",
+      "opis": "Konfiguracja VLAN i routingu statycznego",
+      "termin": "2026-11-21",
+      "priorytet": "wysoki",
+      "wykonane": false,
+      "tagi": ["studia", "lab"]
+    },
+    {
+      "id": 4,
+      "tytul": "Zrobić zakupy na weekend",
+      "opis": "",
+      "termin": "2026-11-21",
+      "priorytet": "niski",
+      "wykonane": false,
+      "tagi": ["dom", "zakupy"]
+    },
+    {
+      "id": 5,
+      "tytul": "Posprzątać biurko i uporządkować kable",
+      "opis": "",
+      "termin": null,
+      "priorytet": "niski",
+      "wykonane": false,
+      "tagi": []
+    },
+    {
+      "id": 6,
+      "tytul": "Projekt z baz danych — schemat ERD",
+      "opis": "Normalizacja do 3NF oraz przygotowanie skryptu SQL",
+      "termin": "2026-11-25",
+      "priorytet": "sredni",
+      "wykonane": false,
+      "tagi": ["studia", "projekt", "sql"]
+    },
+    {
+      "id": 7,
+      "tytul": "Wejściówka z algorytmów i struktur danych",
+      "opis": "Drzewa czerwono-czarne i tablice haszujące",
+      "termin": "2026-11-16",
+      "priorytet": "wysoki",
+      "wykonane": true,
+      "tagi": ["studia"]
+    },
+    {
+      "id": 8,
+      "tytul": "Odebrać paczkę z paczkomatu",
+      "opis": "Kod odbioru w SMS-ie",
+      "termin": "2026-11-20",
+      "priorytet": "sredni",
+      "wykonane": false,
+      "tagi": ["prywatne"]
+    },
+    {
+      "id": 9,
+      "tytul": "Zaktualizować CV i profil na GitHubie",
+      "opis": "",
+      "termin": null,
+      "priorytet": "sredni",
+      "wykonane": false,
+      "tagi": ["kariera"]
+    },
+    {
+      "id": 10,
+      "tytul": "Opłacić rachunek za internet",
+      "opis": "",
+      "termin": "2026-11-15",
+      "priorytet": "sredni",
+      "wykonane": true,
+      "tagi": []
+    },
+    {
+      "id": 11,
+      "tytul": "Spotkanie zespołu projektowego online",
+      "opis": "Podział zadań na kolejny sprint",
+      "termin": "2026-11-23",
+      "priorytet": "sredni",
+      "wykonane": false,
+      "tagi": ["projekt", "zespol"]
+    },
+    {
+      "id": 12,
+      "tytul": "Egzamin zerowy z matematyki dyskretnej",
+      "opis": "Grafy Eulera, Hamiltona i kombinatoryka",
+      "termin": "2026-12-04",
+      "priorytet": "wysoki",
+      "wykonane": false,
+      "tagi": ["studia", "egzamin"]
+    }
+  ]
+}
