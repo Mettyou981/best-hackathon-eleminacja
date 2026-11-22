@@ -507,13 +507,39 @@ class SmartPlannerApp(ctk.CTk):
             self.sidebar_frame.lift()
             self.sidebar_visible = True
 
+    def _on_particle_slider_change(self, value):
+        count = int(value)
+        if hasattr(self, "particle_slider_lbl"):
+            self.particle_slider_lbl.configure(text=f"🌐 Cząsteczki: {count}")
+        if hasattr(self, "particle_canvas"):
+            self.particle_canvas.set_num_particles(count)
+
+    def _on_window_resize(self, event):
+        if event.widget == self:
+            w = event.width
+            h = event.height
+            target_w = min(self._max_content_width, max(500, w - 40))
+            for widget_name in ("top_bar", "tiles_row", "filter_bar", "view_switcher_box"):
+                if hasattr(self, widget_name):
+                    try:
+                        getattr(self, widget_name).configure(width=target_w)
+                    except Exception:
+                        pass
+            if hasattr(self, "workspace_frame") and hasattr(self, "_ws_y"):
+                if "Sfera" not in self.view_mode.get():
+                    ws_h = max(200, h - self._ws_y - 14)
+                    try:
+                        self.workspace_frame.configure(width=target_w, height=ws_h)
+                    except Exception:
+                        pass
+
     def _build_ui(self):
         # Maksymalna szerokość kontenera centralnego
         self._max_content_width = 1200
 
-        # === TŁO CZĄSTECZKOWE JARVIS PLEXUS (ANIMACJA PARTICLES W TLE) ===
-        # Umieszczone w oknie głównym za kontenerami półprzezroczystymi
-        self.particle_canvas = JarvisParticleCanvas(self, num_particles=70)
+        # === TŁO CZĄSTECZKOWE: WIRUJĄCA 3D SFERA PLEXUS JARVIS (WARSTWA TŁA) ===
+        # Umieszczone w oknie głównym jako warstwa tła, widoczna pod kafelkami i dookoła nich
+        self.particle_canvas = JarvisParticleCanvas(self, num_particles=110)
         self.particle_canvas.place(x=0, y=0, relwidth=1.0, relheight=1.0)
 
         # === LEWY WYSUWANY PASEK BOCZNY NA LIGI (NAKŁADKA OVERLAY) ===
@@ -587,34 +613,23 @@ class SmartPlannerApp(ctk.CTk):
             anchor="w",
         ).pack(fill="x", padx=10, pady=8)
 
-        # === GŁÓWNY KONTENER ===
-        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_container.pack(fill="both", expand=True)
-        self.main_container.lift()
-
-        # Centralny kontener z ograniczoną szerokością
-        self.center_wrapper = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.center_wrapper.pack(expand=True, fill="both")
-
-        self.content_frame = ctk.CTkFrame(self.center_wrapper, fg_color="transparent", width=self._max_content_width)
-        self.content_frame.pack(expand=True, fill="both", padx=30, pady=0)
-
-        # === GÓRNY PASEK — Arc Reactor HUD + Tytuł + Data + Przyciski Glass ===
-        top_bar = ctk.CTkFrame(
-            self.content_frame,
+        # === GÓRNY PASEK — Arc Reactor HUD + Tytuł + Data + Slider Cząsteczek + Przyciski ===
+        self.top_bar = ctk.CTkFrame(
+            self,
+            width=self._max_content_width,
+            height=52,
             fg_color=JARVIS["glass_panel"],
             border_width=1,
             border_color=JARVIS["border_cyan"],
             corner_radius=10,
         )
-        top_bar.pack(fill="x", pady=(14, 0))
 
         # Miniaturowy obracający się Reaktor Łukowy HUD (kółko) obok tytułu aplikacji
-        self.arc_reactor = JarvisArcReactor(top_bar, size=38, bg=JARVIS["glass_panel"])
+        self.arc_reactor = JarvisArcReactor(self.top_bar, size=38, bg=JARVIS["glass_panel"])
         self.arc_reactor.pack(side="left", padx=(12, 6), pady=6)
 
         ctk.CTkLabel(
-            top_bar,
+            self.top_bar,
             text="PODSIECIOWE MASKARADY",
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color=JARVIS["cyan"],
@@ -626,7 +641,7 @@ class SmartPlannerApp(ctk.CTk):
         _, nr_tygodnia, _ = dzis.isocalendar()
 
         date_center = ctk.CTkFrame(
-            top_bar,
+            self.top_bar,
             fg_color=JARVIS["glass_panel_alt"],
             corner_radius=8,
             border_width=1,
@@ -654,7 +669,7 @@ class SmartPlannerApp(ctk.CTk):
 
         # Przyciski po prawej — półprzezroczyste szklane przyciski z delikatnym obramowaniem
         ctk.CTkButton(
-            top_bar,
+            self.top_bar,
             text="Zapisz jako JSON",
             width=115,
             fg_color=JARVIS["btn_glass_bg"],
@@ -666,7 +681,7 @@ class SmartPlannerApp(ctk.CTk):
         ).pack(side="right", padx=(4, 14), pady=10)
 
         ctk.CTkButton(
-            top_bar,
+            self.top_bar,
             text="Zapisz JSON",
             width=95,
             fg_color=JARVIS["btn_glass_bg"],
@@ -678,7 +693,7 @@ class SmartPlannerApp(ctk.CTk):
         ).pack(side="right", padx=4, pady=10)
 
         ctk.CTkButton(
-            top_bar,
+            self.top_bar,
             text="Wczytaj JSON",
             width=105,
             fg_color=JARVIS["btn_cyan_bg"],
@@ -690,7 +705,7 @@ class SmartPlannerApp(ctk.CTk):
         ).pack(side="right", padx=4, pady=10)
 
         ctk.CTkButton(
-            top_bar,
+            self.top_bar,
             text="📄 Raport PDF",
             width=105,
             fg_color="#3a1c54",
@@ -702,7 +717,7 @@ class SmartPlannerApp(ctk.CTk):
         ).pack(side="right", padx=4, pady=10)
 
         ctk.CTkButton(
-            top_bar,
+            self.top_bar,
             text="🔔",
             width=36,
             fg_color=JARVIS["btn_glass_bg"],
@@ -713,15 +728,52 @@ class SmartPlannerApp(ctk.CTk):
             command=lambda: self.check_deadline_notifications(manual=True),
         ).pack(side="right", padx=4, pady=10)
 
+        # Kontrolka cząsteczek tła ze sliderem (wymóg: slider zmieniający ich ilość w sferze)
+        particle_ctrl = ctk.CTkFrame(
+            self.top_bar,
+            fg_color=JARVIS["glass_panel_alt"],
+            corner_radius=8,
+            border_width=1,
+            border_color=JARVIS["border_cyan"],
+        )
+        particle_ctrl.pack(side="right", padx=(4, 6), pady=8)
+
+        self.particle_slider_lbl = ctk.CTkLabel(
+            particle_ctrl,
+            text=f"🌐 Cząsteczki: {self.particle_canvas.num_particles}",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=JARVIS["cyan"],
+        )
+        self.particle_slider_lbl.pack(side="left", padx=(8, 4), pady=4)
+
+        self.particle_slider = ctk.CTkSlider(
+            particle_ctrl,
+            from_=30,
+            to=300,
+            number_of_steps=54,
+            width=90,
+            height=14,
+            progress_color=JARVIS["cyan"],
+            button_color=JARVIS["cyan"],
+            button_hover_color=JARVIS["text_ice"],
+            command=self._on_particle_slider_change,
+        )
+        self.particle_slider.set(self.particle_canvas.num_particles)
+        self.particle_slider.pack(side="left", padx=(2, 8), pady=4)
+
         # === TRZY KAFELKI W JEDNYM RZĘDZIE ===
         # Dodawanie zadania jest znacznie szersze (weight=5), a Liga i Smart Focus węższe (weight=3)
-        tiles_row = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        tiles_row.pack(fill="x", pady=(10, 0))
-        tiles_row.grid_columnconfigure(0, weight=5, uniform="tile_col")
-        tiles_row.grid_columnconfigure(1, weight=3, uniform="tile_col")
-        tiles_row.grid_columnconfigure(2, weight=3, uniform="tile_col")
-
         TILE_HEIGHT = 172
+        self.tiles_row = ctk.CTkFrame(
+            self,
+            width=self._max_content_width,
+            height=TILE_HEIGHT,
+            fg_color="transparent",
+        )
+        tiles_row = self.tiles_row
+        self.tiles_row.grid_columnconfigure(0, weight=5, uniform="tile_col")
+        self.tiles_row.grid_columnconfigure(1, weight=3, uniform="tile_col")
+        self.tiles_row.grid_columnconfigure(2, weight=3, uniform="tile_col")
 
         # --- KAFELEK 1: Dodawanie zadania (SZEROKI z osobnymi polami na priorytet, datę, # i lokalizację) ---
         add_tile = ctk.CTkFrame(
@@ -1032,17 +1084,18 @@ class SmartPlannerApp(ctk.CTk):
         self.focus_done_btn.pack(fill="x", padx=12, pady=(0, 8))
 
         # === SEKCJA: Wyszukiwanie + Filtry ===
-        filter_bar = ctk.CTkFrame(
-            self.content_frame,
+        self.filter_bar = ctk.CTkFrame(
+            self,
+            width=self._max_content_width,
+            height=48,
             fg_color=JARVIS["glass_panel"],
             border_width=1,
             border_color=JARVIS["border_subtle"],
             corner_radius=10,
         )
-        filter_bar.pack(fill="x", pady=(10, 0))
 
         self.search_entry = ctk.CTkEntry(
-            filter_bar,
+            self.filter_bar,
             textvariable=self.search_var,
             placeholder_text="🔍 Szukaj po tytule, opisie, ID, dacie, tagu lub lokalizacji...",
             height=32,
@@ -1054,7 +1107,7 @@ class SmartPlannerApp(ctk.CTk):
         self.search_entry.pack(side="left", padx=(12, 6), pady=8)
 
         ctk.CTkSegmentedButton(
-            filter_bar,
+            self.filter_bar,
             values=["Wszystkie", "Do zrobienia", "Po terminie", "Zrobione"],
             variable=self.filter_mode,
             command=lambda _: self.refresh_ui(),
@@ -1066,7 +1119,7 @@ class SmartPlannerApp(ctk.CTk):
         ).pack(side="left", padx=6, pady=8)
 
         self.prio_filter_menu = ctk.CTkOptionMenu(
-            filter_bar,
+            self.filter_bar,
             values=["Priorytet: Wszystkie", "wysoki", "sredni", "niski"],
             variable=self.prio_filter_var,
             width=150,
@@ -1080,7 +1133,7 @@ class SmartPlannerApp(ctk.CTk):
         self.prio_filter_menu.pack(side="left", padx=4, pady=8)
 
         self.date_filter_menu = ctk.CTkOptionMenu(
-            filter_bar,
+            self.filter_bar,
             values=["Termin: Wszystkie", "Na dziś", "Po terminie", "Z terminem", "Bez terminu (null)"],
             variable=self.date_filter_var,
             width=160,
@@ -1094,7 +1147,7 @@ class SmartPlannerApp(ctk.CTk):
         self.date_filter_menu.pack(side="left", padx=4, pady=8)
 
         self.tag_filter_menu = ctk.CTkOptionMenu(
-            filter_bar,
+            self.filter_bar,
             values=["Tag: Wszystkie"],
             variable=self.tag_filter_var,
             width=140,
@@ -1108,7 +1161,7 @@ class SmartPlannerApp(ctk.CTk):
         self.tag_filter_menu.pack(side="left", padx=4, pady=8)
 
         ctk.CTkButton(
-            filter_bar,
+            self.filter_bar,
             text="✕ Reset",
             width=65,
             height=30,
@@ -1121,12 +1174,16 @@ class SmartPlannerApp(ctk.CTk):
         ).pack(side="left", padx=(4, 12), pady=8)
 
         # === WYRÓŻNIAJĄCY SIĘ, WIĘKSZY PRZEŁĄCZNIK WIDOKU NAD SAMYM WIDOKIEM ===
-        view_switcher_box = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        view_switcher_box.pack(fill="x", pady=(10, 4))
+        self.view_switcher_box = ctk.CTkFrame(
+            self,
+            width=self._max_content_width,
+            height=42,
+            fg_color="transparent",
+        )
 
         self.view_switcher = ctk.CTkSegmentedButton(
-            view_switcher_box,
-            values=["📋 Tablica", "📅 Kalendarz", "📝 Lista", "🌍 Globus 3D"],
+            self.view_switcher_box,
+            values=["📋 Tablica", "📅 Kalendarz", "📝 Lista", "🌍 Globus 3D", "🌐 Sfera 3D"],
             variable=self.view_mode,
             command=lambda _: self.refresh_ui(),
             height=38,
@@ -1141,8 +1198,22 @@ class SmartPlannerApp(ctk.CTk):
         self.view_switcher.pack(anchor="center")
 
         # === KONTENER ROBOCZY (Tablica Kanban / Kalendarz / Lista / Globus 3D) ===
-        self.workspace_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        self.workspace_frame.pack(fill="both", expand=True, pady=(2, 14))
+        self.workspace_frame = ctk.CTkFrame(
+            self,
+            width=self._max_content_width,
+            height=520,
+            fg_color="transparent",
+        )
+
+        # Pozycjonowanie sekcji interfejsu bezpośrednio na oknie nad animowaną sferą cząsteczkową w tle
+        self._ws_y = 358
+        self.top_bar.place(relx=0.5, y=12, anchor="n")
+        self.tiles_row.place(relx=0.5, y=72, anchor="n")
+        self.filter_bar.place(relx=0.5, y=252, anchor="n")
+        self.view_switcher_box.place(relx=0.5, y=308, anchor="n")
+        self.workspace_frame.place(relx=0.5, y=self._ws_y, anchor="n")
+
+        self.bind("<Configure>", self._on_window_resize)
 
         self.kanban_board = KanbanBoardFrame(
             self.workspace_frame,
@@ -1569,25 +1640,36 @@ class SmartPlannerApp(ctk.CTk):
 
         filtered_tasks = self._get_filtered_tasks()
 
-        # 5. Wyświetl wybrany widok: Tablica Kanban, Kalendarz, Lista lub Globus 3D
+        # 5. Wyświetl wybrany widok: Tablica Kanban, Kalendarz, Lista, Globus 3D lub Sfera 3D
         current_view = self.view_mode.get()
         self.task_list_frame.pack_forget()
         self.calendar_view.pack_forget()
         self.kanban_board.pack_forget()
         self.globe_view.pack_forget()
 
-        if "Tablica" in current_view:
-            self.kanban_board.pack(fill="both", expand=True)
-            self.kanban_board.render(filtered_tasks)
-        elif "Kalendarz" in current_view:
-            self.calendar_view.pack(fill="both", expand=True)
-            self.calendar_view.render(filtered_tasks)
-        elif "Lista" in current_view:
-            self.task_list_frame.pack(fill="both", expand=True)
-            self._render_list_view(filtered_tasks)
-        elif "Globus" in current_view:
-            self.globe_view.pack(fill="both", expand=True)
-            self.globe_view.render(filtered_tasks)
+        if "Sfera" in current_view:
+            # W widoku Sfera 3D ukrywamy ramkę roboczą, odsłaniając wirującą kulę cząsteczek w pełnej krasie pod kafelkami
+            self.workspace_frame.place_forget()
+        else:
+            w = self.winfo_width()
+            h = self.winfo_height()
+            target_w = min(self._max_content_width, max(500, w - 40)) if w > 50 else self._max_content_width
+            ws_h = max(200, h - self._ws_y - 14) if h > 50 else 520
+            self.workspace_frame.configure(width=target_w, height=ws_h)
+            self.workspace_frame.place(relx=0.5, y=self._ws_y, anchor="n")
+
+            if "Tablica" in current_view:
+                self.kanban_board.pack(fill="both", expand=True)
+                self.kanban_board.render(filtered_tasks)
+            elif "Kalendarz" in current_view:
+                self.calendar_view.pack(fill="both", expand=True)
+                self.calendar_view.render(filtered_tasks)
+            elif "Lista" in current_view:
+                self.task_list_frame.pack(fill="both", expand=True)
+                self._render_list_view(filtered_tasks)
+            elif "Globus" in current_view:
+                self.globe_view.pack(fill="both", expand=True)
+                self.globe_view.render(filtered_tasks)
 
     def _render_list_view(self, tasks: list[dict]):
         for widget in self.task_list_frame.winfo_children():

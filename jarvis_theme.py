@@ -54,56 +54,114 @@ JARVIS = {
 }
 
 
-class JarvisParticleCanvas(ctk.CTkCanvas):
+class JarvisSphereParticleCanvas(ctk.CTkCanvas):
     """
-    Płótno generujące płynną, futurystyczną animację cząsteczek (particles plexus)
-    w stylu Jarvis / Iron Man HUD.
-    Cząsteczki unoszą się powoli w przestrzeni, a gdy zbliżają się do siebie,
-    są łączone delikatnymi liniami lasera/danych.
-    W tle widoczne są subtelne koncentryczne okręgi radaru HUD.
+    Futurystyczna animacja trójwymiarowej sfery cząsteczkowej (3D Particle Plexus Sphere)
+    w stylu Jarvis / Iron Man HUD, dokładnie wg obrazu referencyjnego.
+    Cząsteczki poruszają się w przestrzeni 3D na powłoce sfery, tworząc wirującą kulę danych.
+    Węzły w kolorach elektrycznego cyjanu oraz ciepłego złota/bursztynu łączą się dynamicznymi
+    wiązkami lasera (plexus effect).
+    Węzły na pierwszym planie (z > 0) posiadają jaskrawe neony i poświaty, a węzły z tyłu (z < 0)
+    są przygaszone, tworząc głęboki, holograficzny efekt 3D.
     """
 
-    def __init__(self, master, num_particles: int = 55, **kwargs):
+    def __init__(self, master, num_particles: int = 110, **kwargs):
         kwargs.setdefault("bg", JARVIS["bg_root"])
         kwargs.setdefault("highlightthickness", 0)
         kwargs.setdefault("bd", 0)
         super().__init__(master, **kwargs)
 
-        self.num_particles = num_particles
+        self.num_particles = max(25, min(350, num_particles))
         self.particles: list[dict] = []
         self._anim_running = True
         self._after_id = None
-        self._hud_angle = 0.0
+
+        # Kąty obrotu sfery 3D
+        self.yaw = 0.0
+        self.pitch = 0.38  # Kąt nachylenia osi sfery (~22°)
+        self.yaw_speed = 0.007
+        self._time = 0.0
+
+        # Interakcja myszą (obracanie kulą przez przeciąganie)
+        self._is_dragging = False
+        self._drag_start_x = 0
+        self._drag_start_y = 0
 
         self.bind("<Configure>", self._on_resize)
-        self.after(50, self._init_particles)
-        self.after(100, self._tick)
+        self.bind("<ButtonPress-1>", self._on_mouse_down)
+        self.bind("<B1-Motion>", self._on_mouse_drag)
+        self.bind("<ButtonRelease-1>", self._on_mouse_up)
 
-    def _init_particles(self):
-        w = max(400, self.winfo_width())
-        h = max(300, self.winfo_height())
+        self.after(40, self._init_sphere)
+        self.after(90, self._tick)
+
+    def _init_sphere(self):
+        """Generuje punkty na powłoce sfery 3D z klastrami cyjanowymi i złotymi (jak na referencji)."""
         self.particles = []
+        n = self.num_particles
 
-        colors = ["#00e5ff", "#00a8e8", "#0077ff", "#4de5ff", "#00558f"]
-        for _ in range(self.num_particles):
+        # Centra klastrów złotych / bursztynowych (kontynenty danych jak na obrazie referencyjnym)
+        amber_centers = [
+            (0.55, 0.45, 0.65),
+            (-0.60, -0.35, 0.68),
+            (-0.25, 0.70, -0.65),
+        ]
+
+        for i in range(n):
+            # Równomierny rozkład Fibonacciego na sferze
+            y0 = 1.0 - (2.0 * i) / max(1, n - 1)
+            radius_at_y = math.sqrt(max(0.0, 1.0 - y0 * y0))
+            theta = 2.399963229728653 * i  # Złoty kąt
+
+            # Wolumetryczna powłoka — subtelna dyspersja radialna
+            r_shell = random.uniform(0.88, 1.12)
+            bx = r_shell * radius_at_y * math.cos(theta)
+            by = r_shell * y0
+            bz = r_shell * radius_at_y * math.sin(theta)
+
+            # Sprawdź przynależność do klastrów złota/bursztynu
+            is_amber = False
+            for acx, acy, acz in amber_centers:
+                dist_sq = (bx - acx) ** 2 + (by - acy) ** 2 + (bz - acz) ** 2
+                if dist_sq < 0.58 ** 2 and random.random() < 0.85:
+                    is_amber = True
+                    break
+
             self.particles.append({
-                "x": random.uniform(0, w),
-                "y": random.uniform(0, h),
-                "vx": random.uniform(-0.35, 0.35),
-                "vy": random.uniform(-0.35, 0.35),
-                "r": random.uniform(1.2, 2.8),
-                "color": random.choice(colors),
+                "bx": bx,
+                "by": by,
+                "bz": bz,
+                "phase": random.uniform(0, math.pi * 2),
+                "speed": random.uniform(0.6, 1.4),
+                "is_amber": is_amber,
+                "base_r": random.uniform(2.0, 3.4),
             })
 
+    def set_num_particles(self, count: int):
+        """Dynamicznie zmienia liczbę cząsteczek w sferze w czasie rzeczywistym ze slidera."""
+        self.num_particles = max(25, min(350, int(count)))
+        self._init_sphere()
+
     def _on_resize(self, event):
-        # Dopasuj cząsteczki do nowego rozmiaru okna
-        w = event.width
-        h = event.height
-        for p in self.particles:
-            if p["x"] > w:
-                p["x"] = random.uniform(0, w)
-            if p["y"] > h:
-                p["y"] = random.uniform(0, h)
+        pass
+
+    def _on_mouse_down(self, event):
+        self._is_dragging = True
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+
+    def _on_mouse_drag(self, event):
+        if not self._is_dragging:
+            return
+        dx = event.x - self._drag_start_x
+        dy = event.y - self._drag_start_y
+        self.yaw -= dx * 0.006
+        self.pitch = max(-1.4, min(1.4, self.pitch + dy * 0.006))
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+
+    def _on_mouse_up(self, event):
+        self._is_dragging = False
 
     def _tick(self):
         if not self._anim_running:
@@ -114,7 +172,9 @@ class JarvisParticleCanvas(ctk.CTkCanvas):
         if w > 20 and h > 20:
             self._render_frame(w, h)
 
-        self._hud_angle = (self._hud_angle + 0.25) % 360.0
+        if not self._is_dragging:
+            self.yaw += self.yaw_speed
+        self._time += 0.035
         self._after_id = self.after(35, self._tick)
 
     def _render_frame(self, w: int, h: int):
@@ -122,53 +182,138 @@ class JarvisParticleCanvas(ctk.CTkCanvas):
 
         cx = w / 2.0
         cy = h / 2.0
+        sphere_r = min(w, h) * 0.38
+        if sphere_r < 50:
+            return
 
-        # 1. Subtelne tło radarowe HUD (koncentryczne okręgi w stylu Jarvis)
-        radar_radii = [180, 360, 540]
-        for rad in radar_radii:
-            self.create_oval(cx - rad, cy - rad, cx + rad, cy + rad, outline="#071b30", width=1)
+        # 1. Tło: subtelny radar HUD Jarvis w tle kuli
+        for rad_mult in (0.7, 1.05, 1.35):
+            rad = sphere_r * rad_mult
+            self.create_oval(cx - rad, cy - rad, cx + rad, cy + rad, outline="#051424", width=1)
 
-        # 2. Ruch i odbijanie cząsteczek
-        pts = []
-        for p in self.particles:
-            p["x"] += p["vx"]
-            p["y"] += p["vy"]
+        # 2. Oblicz pozycje cząsteczek po obrocie w 3D
+        cos_yaw = math.cos(self.yaw)
+        sin_yaw = math.sin(self.yaw)
+        # Delikatne kołysanie osi pitch
+        effective_pitch = self.pitch + 0.04 * math.sin(self._time * 0.4)
+        cos_pitch = math.cos(effective_pitch)
+        sin_pitch = math.sin(effective_pitch)
 
-            # Zawijanie na krawędziach
-            if p["x"] < -10:
-                p["x"] = w + 10
-            elif p["x"] > w + 10:
-                p["x"] = -10
-            if p["y"] < -10:
-                p["y"] = h + 10
-            elif p["y"] > h + 10:
-                p["y"] = -10
+        proj = []
+        for i, p in enumerate(self.particles):
+            # Płynny organiczny mikro-ruch na powłoce
+            ph = p["phase"] + self._time * p["speed"]
+            dx = 0.035 * math.sin(ph)
+            dy = 0.035 * math.cos(ph * 1.2)
+            dz = 0.035 * math.sin(ph * 0.7)
 
-            pts.append((p["x"], p["y"], p["r"], p["color"]))
+            x = p["bx"] + dx
+            y = p["by"] + dy
+            z = p["bz"] + dz
 
-        # 3. Linie danych łączące bliskie cząsteczki (plexus effect)
-        max_dist_sq = 85.0 ** 2
-        for i in range(len(pts)):
-            x1, y1, _, _ = pts[i]
-            for j in range(i + 1, len(pts)):
-                x2, y2, _, _ = pts[j]
-                dx = x2 - x1
-                dy = y2 - y1
-                dist_sq = dx * dx + dy * dy
+            # Obrót yaw (oś Y)
+            x1 = x * cos_yaw - z * sin_yaw
+            y1 = y
+            z1 = x * sin_yaw + z * cos_yaw
+
+            # Obrót pitch (oś X)
+            x2 = x1
+            y2 = y1 * cos_pitch - z1 * sin_pitch
+            z2 = y1 * sin_pitch + z1 * cos_pitch
+
+            # Rzutowanie na płaszczyznę 2D
+            sx = cx + x2 * sphere_r
+            sy = cy - y2 * sphere_r
+
+            proj.append({
+                "i": i,
+                "x3": x2,
+                "y3": y2,
+                "z3": z2,
+                "sx": sx,
+                "sy": sy,
+                "is_amber": p["is_amber"],
+                "base_r": p["base_r"],
+                "conn_count": 0,
+            })
+
+        # 3. Plexus — połączenia wiązkami energii między bliskimi punktami w 3D
+        max_dist = 0.44 * (110.0 / max(30, self.num_particles)) ** 0.35
+        max_dist_sq = max_dist * max_dist
+
+        num_p = len(proj)
+        for i in range(num_p):
+            p1 = proj[i]
+            for j in range(i + 1, num_p):
+                p2 = proj[j]
+                dx = p2["x3"] - p1["x3"]
+                dy = p2["y3"] - p1["y3"]
+                dz = p2["z3"] - p1["z3"]
+                dist_sq = dx * dx + dy * dy + dz * dz
+
                 if dist_sq < max_dist_sq:
-                    # Im bliżej, tym jaśniejsza linia lasera
-                    if dist_sq < 40.0 ** 2:
-                        line_col = "#004d73"
-                    else:
-                        line_col = "#002b40"
-                    self.create_line(x1, y1, x2, y2, fill=line_col, width=1)
+                    p1["conn_count"] += 1
+                    p2["conn_count"] += 1
 
-        # 4. Rysowanie świecących punktów cząsteczek
-        for px, py, pr, pcol in pts:
-            # Poświata
-            self.create_oval(px - pr - 1, py - pr - 1, px + pr + 1, py + pr + 1, fill="", outline="#003859", width=1)
-            # Rdzeń
-            self.create_oval(px - pr, py - pr, px + pr, py + pr, fill=pcol, outline="")
+                    avg_z = (p1["z3"] + p2["z3"]) * 0.5
+                    is_both_amber = p1["is_amber"] and p2["is_amber"]
+                    is_mixed = p1["is_amber"] != p2["is_amber"]
+
+                    # Kolor i jasność wiązki w zależności od głębi Z i typu węzłów
+                    if avg_z > 0.15:
+                        if is_both_amber:
+                            col = "#f59e0b" if dist_sq < (max_dist_sq * 0.4) else "#b45309"
+                        elif is_mixed:
+                            col = "#0ea5e9"
+                        else:
+                            col = "#00e5ff" if dist_sq < (max_dist_sq * 0.4) else "#0088cc"
+                        self.create_line(p1["sx"], p1["sy"], p2["sx"], p2["sy"], fill=col, width=1.5 if dist_sq < (max_dist_sq * 0.25) else 1.0)
+                    elif avg_z > -0.25:
+                        if is_both_amber:
+                            col = "#78350f"
+                        elif is_mixed:
+                            col = "#0369a1"
+                        else:
+                            col = "#004f7a"
+                        self.create_line(p1["sx"], p1["sy"], p2["sx"], p2["sy"], fill=col, width=1.0)
+                    else:
+                        col = "#2a1503" if is_both_amber else "#031d33"
+                        self.create_line(p1["sx"], p1["sy"], p2["sx"], p2["sy"], fill=col, width=1.0)
+
+        # 4. Rysowanie węzłów (od tyłu do przodu — sortowanie wg z3)
+        proj.sort(key=lambda item: item["z3"])
+
+        for pt in proj:
+            z = pt["z3"]
+            sx = pt["sx"]
+            sy = pt["sy"]
+            is_amber = pt["is_amber"]
+            conn = pt["conn_count"]
+
+            if z > 0:
+                # Przednia półkula — duże, świecące węzły z poświatą neonową
+                r = pt["base_r"] * (0.9 + 0.5 * (z / 1.15))
+                if is_amber:
+                    core_col = "#ffffff" if (conn >= 3 and z > 0.4) else "#fbbf24"
+                    glow_col = "#d97706"
+                else:
+                    core_col = "#ffffff" if (conn >= 3 and z > 0.4) else "#00e5ff"
+                    glow_col = "#0077b6"
+
+                if conn >= 3:
+                    halo_r = r + 3.0
+                    self.create_oval(sx - halo_r, sy - halo_r, sx + halo_r, sy + halo_r, outline=glow_col, width=1)
+
+                self.create_oval(sx - r, sy - r, sx + r, sy + r, fill=core_col, outline=glow_col if conn >= 2 else "")
+            else:
+                # Tylna półkula — małe, przygaszone punkty dające głębię
+                r = pt["base_r"] * max(0.4, 0.8 + 0.3 * (z / 1.15))
+                dim_col = "#78350f" if is_amber else "#0369a1"
+                self.create_oval(sx - r, sy - r, sx + r, sy + r, fill=dim_col, outline="")
+
+
+# Alias wsteczny dla kompatybilności importów
+JarvisParticleCanvas = JarvisSphereParticleCanvas
 
 
 class JarvisArcReactor(ctk.CTkCanvas):
