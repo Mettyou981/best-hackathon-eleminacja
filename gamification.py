@@ -8,6 +8,8 @@ PRIORITY_POINTS = {
     "wysoki": 3,
 }
 
+POMODORO_BONUS_POINTS = 3
+
 LEAGUES = [
     (0, "Brązowa", "#cd7f32"),
     (15, "Srebrna", "#bdc3c7"),
@@ -46,6 +48,7 @@ class GamificationManager:
             "goal_set_for_week": None,
             "active_week": _current_iso_week(),
             "completed_this_week": 0,
+            "pomodoro_sessions": 0,
             "rewarded_tasks": [],
         }
 
@@ -136,6 +139,7 @@ class GamificationManager:
         self.state["active_week"] = now_week
         self.state["completed_this_week"] = 0
         self.state["points_this_week"] = 0
+        self.state["pomodoro_sessions"] = 0
         self.save_state()
         return "\n".join(messages)
 
@@ -165,6 +169,7 @@ class GamificationManager:
 
         self.state["completed_this_week"] = 0
         self.state["points_this_week"] = 0
+        self.state["pomodoro_sessions"] = 0
         self.save_state()
         return msg
 
@@ -193,11 +198,29 @@ class GamificationManager:
 
         return earned, feedback
 
+    def record_pomodoro_completed(self, task_title: str | None = None) -> tuple[int, str]:
+        """Przyznaje bonus punktowy za ukończenie 25-minutowej sesji Pomodoro bez przerywania."""
+        old_league = self.get_league_info()["name"]
+        earned = POMODORO_BONUS_POINTS
+
+        self.state["points"] += earned
+        self.state["points_this_week"] = self.state.get("points_this_week", 0) + earned
+        self.state["pomodoro_sessions"] = self.state.get("pomodoro_sessions", 0) + 1
+        self.save_state()
+
+        new_league = self.get_league_info()["name"]
+        target_info = f" ({task_title})" if task_title else ""
+        feedback = f"🍅 Ukończono sesję Pomodoro 25 min{target_info}: +{earned} pkt!"
+        if new_league != old_league:
+            feedback += f"  |  🎉 AWANS DO LIGI: {new_league.upper()}!"
+        return earned, feedback
+
     def reset_weekly_progress(self) -> None:
         """Resetuje postęp i punkty z bieżącego tygodnia przy wczytaniu nowej listy zadań."""
         weekly_pts = self.state.get("points_this_week", 0)
         self.state["points"] = max(0, self.state["points"] - weekly_pts)
         self.state["points_this_week"] = 0
         self.state["completed_this_week"] = 0
+        self.state["pomodoro_sessions"] = 0
         self.state["rewarded_tasks"] = []
         self.save_state()
