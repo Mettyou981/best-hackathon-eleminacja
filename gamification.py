@@ -40,7 +40,7 @@ class GamificationManager:
     def _default_state(self) -> dict:
         return {
             "points": 0,
-            "points_this_week":0,
+            "points_this_week": 0,
             "streak": 0,
             "weekly_goal": 3,
             "goal_set_for_week": None,

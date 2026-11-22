@@ -1,10 +1,12 @@
 from pathlib import Path
+from datetime import date
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from storage import load_tasks, save_tasks
 from smart import parse_quick_add, get_smart_focus_task, is_overdue
-from gamification import GamificationManager, PRIORITY_POINTS
-from datetime import date
+from gamification import GamificationManager, PRIORITY_POINTS, LEAGUES, INACTIVITY_PENALTY
+from kanban import KanbanBoardFrame, COLUMNS, target_date_for_column
+from calendar_view import CalendarViewFrame
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -139,7 +141,7 @@ class EditDialog(ctk.CTkToplevel):
 class SmartPlannerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.geometry("1000x740")
+        self.geometry("1320x790")
 
         base_dir = Path(__file__).resolve().parent
         default_path = base_dir / "zadania.json"
@@ -153,14 +155,20 @@ class SmartPlannerApp(ctk.CTk):
         else:
             self.data = {"wersja": 1, "zadania": []}
             self.current_file = None
+
+        self.sidebar_visible = False
+        self.bind("<Escape>", lambda _: self.toggle_sidebar() if self.sidebar_visible else None)
+
+        self.view_mode = ctk.StringVar(value="Tablica")
         self.filter_mode = ctk.StringVar(value="Wszystkie")
         self.search_var = ctk.StringVar(value="")
         self.search_var.trace_add("write", lambda *_: self.refresh_ui())
         self.prio_filter_var = ctk.StringVar(value="Priorytet: Wszystkie")
         self.date_filter_var = ctk.StringVar(value="Termin: Wszystkie")
         self.tag_filter_var = ctk.StringVar(value="Tag: Wszystkie")
+
         self.gamification = GamificationManager()
-        self.last_event_text = "Wykonuj zadania z wyprzedzeniem (niski = 5 pkt, średni = 4 pkt, wysoki = 3 pkt)."
+        self.last_event_text = "Przeciągaj karty między kolumnami terminów lub odhaczaj zadania z wyprzedzeniem (+5 / +4 / +3 pkt)."
 
         self._build_ui()
         self.refresh_ui()
@@ -190,42 +198,140 @@ class SmartPlannerApp(ctk.CTk):
         self.refresh_ui()
         messagebox.showinfo("Symulacja końca tygodnia", summary, parent=self)
 
+    def toggle_sidebar(self):
+        if self.sidebar_visible:
+            self.sidebar_frame.place_forget()
+            self.sidebar_visible = False
+            self.sidebar_toggle_btn.configure(text="▶ Ligi")
+        else:
+            self.sidebar_frame.place(x=0, y=0, relheight=1.0)
+            self.sidebar_frame.lift()
+            self.sidebar_visible = True
+            self.sidebar_toggle_btn.configure(text="◀ Ligi")
+
     def _build_ui(self):
+        # === LEWY WYSUWANY PASEK BOCZNY NA LIGI (NAKŁADKA OVERLAY) ===
+        self.sidebar_frame = ctk.CTkFrame(
+            self,
+            width=265,
+            fg_color="#121a22",
+            border_width=2,
+            border_color="#3498db",
+            corner_radius=0,
+        )
+        self.sidebar_frame.pack_propagate(False)
+
+        sb_header = ctk.CTkFrame(self.sidebar_frame, fg_color="#1a2530", corner_radius=0)
+        sb_header.pack(fill="x")
+
+        ctk.CTkLabel(
+            sb_header,
+            text=f"🏆 Ligi ({len(LEAGUES)})",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(side="left", padx=12, pady=12)
+
+        ctk.CTkButton(
+            sb_header,
+            text="◀",
+            width=30,
+            height=28,
+            fg_color="#2c3e50",
+            hover_color="#34495e",
+            command=self.toggle_sidebar,
+        ).pack(side="right", padx=10, pady=10)
+
+        self.sb_summary_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color="#85c1e9",
+            justify="left",
+            anchor="w",
+        )
+        self.sb_summary_label.pack(fill="x", padx=12, pady=(10, 6))
+
+        self.sb_leagues_scroll = ctk.CTkScrollableFrame(self.sidebar_frame, fg_color="transparent")
+        self.sb_leagues_scroll.pack(fill="both", expand=True, padx=6, pady=4)
+
+        rules_box = ctk.CTkFrame(self.sidebar_frame, fg_color="#19232d", corner_radius=8)
+        rules_box.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(
+            rules_box,
+            text=(
+                "Zasady punktacji:\n"
+                "• Niski priorytet: +5 pkt\n"
+                "• Średni priorytet: +4 pkt\n"
+                "• Wysoki priorytet: +3 pkt\n"
+                f"• Brak celu w tyg.: -{INACTIVITY_PENALTY} pkt"
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color="#aeb6bf",
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", padx=10, pady=8)
+
+        # === GŁÓWNY KONTENER TREŚCI (ZAWSZE PEŁNA SZEROKOŚĆ) ===
+        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_container.pack(fill="both", expand=True)
+
         # Górny pasek narzędziowy
-        top_bar = ctk.CTkFrame(self)
-        top_bar.pack(fill="x", padx=15, pady=(15, 6))
+        top_bar = ctk.CTkFrame(self.main_container)
+        top_bar.pack(fill="x", padx=15, pady=(12, 5))
 
-        ctk.CTkLabel(top_bar, text="SmartApp", font=ctk.CTkFont(size=22, weight="bold")).pack(side="left", padx=12, pady=10)
+        self.sidebar_toggle_btn = ctk.CTkButton(
+            top_bar,
+            text="▶ Ligi",
+            width=75,
+            height=30,
+            fg_color="#2c3e50",
+            hover_color="#34495e",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.toggle_sidebar,
+        )
+        self.sidebar_toggle_btn.pack(side="left", padx=(10, 4), pady=8)
 
-        ctk.CTkButton(top_bar, text="Zapisz jako JSON", width=130, command=self.export_json).pack(side="right", padx=(5, 12))
-        ctk.CTkButton(top_bar, text="Zapisz JSON", width=110, command=self.save_current_json).pack(side="right", padx=5)
-        ctk.CTkButton(top_bar, text="Wczytaj JSON", width=120, fg_color="#2980b9", command=self.import_json).pack(side="right", padx=5)
+        ctk.CTkLabel(top_bar, text="SmartApp", font=ctk.CTkFont(size=22, weight="bold")).pack(side="left", padx=8, pady=8)
+
+        # Przełącznik widoku Tablica (Kanban) / Kalendarz / Lista
+        ctk.CTkSegmentedButton(
+            top_bar,
+            values=["Tablica", "Kalendarz", "Lista"],
+            variable=self.view_mode,
+            command=lambda _: self.refresh_ui(),
+        ).pack(side="left", padx=8)
+
+        ctk.CTkButton(top_bar, text="Zapisz jako JSON", width=125, command=self.export_json).pack(side="right", padx=(5, 12))
+        ctk.CTkButton(top_bar, text="Zapisz JSON", width=105, command=self.save_current_json).pack(side="right", padx=5)
+        ctk.CTkButton(top_bar, text="Wczytaj JSON", width=115, fg_color="#2980b9", command=self.import_json).pack(side="right", padx=5)
 
         ctk.CTkSegmentedButton(
             top_bar,
             values=["Wszystkie", "Do zrobienia", "Po terminie", "Zrobione"],
             variable=self.filter_mode,
             command=lambda _: self.refresh_ui(),
-        ).pack(side="right", padx=12)
-        #Pasek z datą
+        ).pack(side="right", padx=10)
+
+        # Pasek z dzisiejszą datą
         dni_tyg = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
         dzis = date.today()
         _, nr_tygodnia, _ = dzis.isocalendar()
         date_text = f"📅 Dzisiaj: {dni_tyg[dzis.weekday()]}, {dzis.strftime('%d.%m.%Y')}  |  Tydzień #{nr_tygodnia}"
-        date_bar = ctk.CTkFrame(self, height=30, fg_color="#16202a")
+
+        date_bar = ctk.CTkFrame(self.main_container, height=28, fg_color="#16202a")
         date_bar.pack(fill="x", padx=15, pady=(0, 4))
         ctk.CTkLabel(
             date_bar,
             text=date_text,
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#85c1e9",
-        ).pack(side="left", padx=12, pady=4)
+        ).pack(side="left", padx=12, pady=3)
+
         # Panel Grywalizacji: Liga Systematyczności + Tygodniowy Cel + Streak
-        league_card = ctk.CTkFrame(self, fg_color="#1b2631", border_width=1, border_color="#2c3e50")
-        league_card.pack(fill="x", padx=15, pady=6)
+        league_card = ctk.CTkFrame(self.main_container, fg_color="#1b2631", border_width=1, border_color="#2c3e50")
+        league_card.pack(fill="x", padx=15, pady=4)
 
         left_gami = ctk.CTkFrame(league_card, fg_color="transparent")
-        left_gami.pack(side="left", fill="x", expand=True, padx=14, pady=10)
+        left_gami.pack(side="left", fill="x", expand=True, padx=14, pady=8)
 
         top_gami_row = ctk.CTkFrame(left_gami, fg_color="transparent")
         top_gami_row.pack(fill="x")
@@ -239,8 +345,10 @@ class SmartPlannerApp(ctk.CTk):
             padx=10,
             pady=2,
             font=ctk.CTkFont(size=12, weight="bold"),
+            cursor="hand2",
         )
         self.league_badge.pack(side="left")
+        self.league_badge.bind("<Button-1>", lambda _: self.toggle_sidebar())
 
         self.points_label = ctk.CTkLabel(
             top_gami_row,
@@ -264,8 +372,8 @@ class SmartPlannerApp(ctk.CTk):
         )
         self.goal_progress_label.pack(side="right", padx=6)
 
-        self.goal_progress_bar = ctk.CTkProgressBar(left_gami, height=10)
-        self.goal_progress_bar.pack(fill="x", pady=(8, 4))
+        self.goal_progress_bar = ctk.CTkProgressBar(left_gami, height=9)
+        self.goal_progress_bar.pack(fill="x", pady=(6, 3))
         self.goal_progress_bar.set(0)
 
         self.gami_status_label = ctk.CTkLabel(
@@ -278,107 +386,199 @@ class SmartPlannerApp(ctk.CTk):
         self.gami_status_label.pack(fill="x")
 
         right_gami = ctk.CTkFrame(league_card, fg_color="transparent")
-        right_gami.pack(side="right", padx=12, pady=10)
+        right_gami.pack(side="right", padx=12, pady=8)
 
         ctk.CTkButton(
             right_gami,
             text="Zmień cel",
             width=135,
-            height=28,
+            height=26,
             fg_color="#34495e",
             command=self.open_goal_dialog,
-        ).pack(pady=(0, 6))
+        ).pack(pady=(0, 5))
 
         ctk.CTkButton(
             right_gami,
             text="Symuluj koniec tyg.",
             width=135,
-            height=28,
+            height=26,
             fg_color="#5d6d7e",
             command=self._simulate_week,
         ).pack()
 
         # Karta Smart Focus
-        self.focus_frame = ctk.CTkFrame(self, fg_color="#1f2d3d", border_width=1, border_color="#3498db")
-        self.focus_frame.pack(fill="x", padx=15, pady=6)
+        self.focus_frame = ctk.CTkFrame(self.main_container, fg_color="#1f2d3d", border_width=1, border_color="#3498db")
+        self.focus_frame.pack(fill="x", padx=15, pady=4)
 
         self.focus_label = ctk.CTkLabel(
             self.focus_frame,
             text="",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=ctk.CTkFont(size=13, weight="bold"),
             justify="left",
         )
-        self.focus_label.pack(side="left", padx=15, pady=10)
+        self.focus_label.pack(side="left", padx=15, pady=7)
 
-        self.focus_done_btn = ctk.CTkButton(self.focus_frame, text="Odhacz teraz", width=110)
-        self.focus_done_btn.pack(side="right", padx=15, pady=10)
+        self.focus_done_btn = ctk.CTkButton(self.focus_frame, text="Odhacz teraz", width=110, height=28)
+        self.focus_done_btn.pack(side="right", padx=15, pady=7)
 
         # Pasek Quick-Add
-        add_bar = ctk.CTkFrame(self)
-        add_bar.pack(fill="x", padx=15, pady=6)
+        add_bar = ctk.CTkFrame(self.main_container)
+        add_bar.pack(fill="x", padx=15, pady=4)
 
         self.quick_entry = ctk.CTkEntry(
             add_bar,
             placeholder_text="Wpisz zadanie, np. Kolokwium z sieci !wysoki @jutro #studia i wciśnij Enter...",
-            height=38,
+            height=34,
         )
-        self.quick_entry.pack(side="left", fill="x", expand=True, padx=(10, 8), pady=10)
+        self.quick_entry.pack(side="left", fill="x", expand=True, padx=(10, 8), pady=7)
         self.quick_entry.bind("<Return>", lambda _: self.add_task())
 
-        ctk.CTkButton(add_bar, text="+ Dodaj", width=100, height=38, command=self.add_task).pack(side="right", padx=(0, 10))
+        ctk.CTkButton(add_bar, text="+ Dodaj", width=100, height=34, command=self.add_task).pack(side="right", padx=(0, 10))
+
         # Pasek wyszukiwania na żywo i filtrowania po wszystkich parametrach
-        filter_bar = ctk.CTkFrame(self, fg_color="#1b2631")
+        filter_bar = ctk.CTkFrame(self.main_container, fg_color="#1b2631")
         filter_bar.pack(fill="x", padx=15, pady=(2, 6))
 
         self.search_entry = ctk.CTkEntry(
             filter_bar,
             textvariable=self.search_var,
             placeholder_text="🔍 Szukaj po tytule, opisie, ID, dacie lub #tagu...",
-            height=32,
+            height=30,
         )
-        self.search_entry.pack(side="left", fill="x", expand=True, padx=(10, 6), pady=8)
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(10, 6), pady=6)
 
         self.prio_filter_menu = ctk.CTkOptionMenu(
             filter_bar,
             values=["Priorytet: Wszystkie", "wysoki", "sredni", "niski"],
             variable=self.prio_filter_var,
             width=155,
-            height=32,
+            height=30,
             command=lambda _: self.refresh_ui(),
         )
-        self.prio_filter_menu.pack(side="left", padx=4, pady=8)
+        self.prio_filter_menu.pack(side="left", padx=4, pady=6)
 
         self.date_filter_menu = ctk.CTkOptionMenu(
             filter_bar,
             values=["Termin: Wszystkie", "Na dziś", "Po terminie", "Z terminem", "Bez terminu (null)"],
             variable=self.date_filter_var,
             width=165,
-            height=32,
+            height=30,
             command=lambda _: self.refresh_ui(),
         )
-        self.date_filter_menu.pack(side="left", padx=4, pady=8)
+        self.date_filter_menu.pack(side="left", padx=4, pady=6)
 
         self.tag_filter_menu = ctk.CTkOptionMenu(
             filter_bar,
             values=["Tag: Wszystkie"],
             variable=self.tag_filter_var,
             width=145,
-            height=32,
+            height=30,
             command=lambda _: self.refresh_ui(),
         )
-        self.tag_filter_menu.pack(side="left", padx=4, pady=8)
+        self.tag_filter_menu.pack(side="left", padx=4, pady=6)
 
         ctk.CTkButton(
             filter_bar,
             text="✕ Reset",
             width=70,
-            height=32,
+            height=30,
             fg_color="#5d6d7e",
             command=self.reset_filters,
-        ).pack(side="left", padx=(4, 10), pady=8)
-        # Lista zadań
-        self.task_list_frame = ctk.CTkScrollableFrame(self)
-        self.task_list_frame.pack(fill="both", expand=True, padx=15, pady=(6, 15))
+        ).pack(side="left", padx=(4, 10), pady=6)
+
+        # Kontener roboczy (mieści Tablicę Kanban, Kalendarz albo Listę)
+        self.workspace_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.workspace_frame.pack(fill="both", expand=True, padx=15, pady=(2, 12))
+
+        self.kanban_board = KanbanBoardFrame(
+            self.workspace_frame,
+            on_move_task=self.move_task_to_column,
+            on_toggle_task=self.toggle_task,
+            on_edit_task=self.edit_task,
+            on_delete_task=self.delete_task,
+            on_add_in_column=self.quick_add_in_column,
+        )
+
+        self.calendar_view = CalendarViewFrame(
+            self.workspace_frame,
+            on_toggle_task=self.toggle_task,
+            on_edit_task=self.edit_task,
+            on_delete_task=self.delete_task,
+            on_add_on_date=self.quick_add_on_date,
+        )
+
+        self.task_list_frame = ctk.CTkScrollableFrame(self.workspace_frame)
+
+    def _render_sidebar(self):
+        pts = self.gamification.state["points"]
+        current_league = self.gamification.get_league_info()["name"]
+        unlocked_count = sum(1 for min_pts, _, _ in LEAGUES if pts >= min_pts)
+
+        self.sb_summary_label.configure(
+            text=f"Twoje punkty: {pts} pkt\nOdblokowano: {unlocked_count} z {len(LEAGUES)} lig"
+        )
+
+        for widget in self.sb_leagues_scroll.winfo_children():
+            widget.destroy()
+
+        # Wyświetlamy od najwyższej ligi (Diamentowa) w dół do Brązowej
+        for idx in range(len(LEAGUES) - 1, -1, -1):
+            min_pts, name, color = LEAGUES[idx]
+            is_current = (name == current_league)
+            is_unlocked = (pts >= min_pts)
+
+            card = ctk.CTkFrame(
+                self.sb_leagues_scroll,
+                fg_color="#1f2f3f" if is_current else ("#182430" if is_unlocked else "#141c24"),
+                border_width=2 if is_current else 1,
+                border_color=color if is_current else ("#34495e" if is_unlocked else "#222d38"),
+                corner_radius=8,
+            )
+            card.pack(fill="x", pady=5, padx=4)
+
+            top_row = ctk.CTkFrame(card, fg_color="transparent")
+            top_row.pack(fill="x", padx=10, pady=(8, 2))
+
+            badge = ctk.CTkLabel(
+                top_row,
+                text=name.upper(),
+                fg_color=color if is_unlocked else "#3b4652",
+                text_color="#111111" if is_unlocked else "#bdc3c7",
+                corner_radius=5,
+                padx=8,
+                pady=1,
+                font=ctk.CTkFont(size=11, weight="bold"),
+            )
+            badge.pack(side="left")
+
+            ctk.CTkLabel(
+                top_row,
+                text=f"od {min_pts} pkt",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color="#d0d3d4" if is_unlocked else "#7f8c8d",
+            ).pack(side="right")
+
+            if is_current:
+                status_txt = "★ TWOJA OBECNA LIGA"
+                status_col = color
+            elif is_unlocked:
+                status_txt = "✓ Zdobyta"
+                status_col = "#2ecc71"
+            else:
+                missing = min_pts - pts
+                status_txt = f"🔒 Brakuje: {missing} pkt"
+                status_col = "#f39c12"
+
+            ctk.CTkLabel(
+                card,
+                text=status_txt,
+                font=ctk.CTkFont(size=12, weight="bold" if (is_current or not is_unlocked) else "normal"),
+                text_color=status_col,
+                anchor="w",
+            ).pack(fill="x", padx=10, pady=(2, 8))
+
+        if self.sidebar_visible:
+            self.sidebar_frame.lift()
 
     def _next_id(self) -> int:
         tasks = self.data.get("zadania", [])
@@ -400,6 +600,73 @@ class SmartPlannerApp(ctk.CTk):
         }
         self.data["zadania"].append(new_task)
         self.quick_entry.delete(0, "end")
+        self.refresh_ui()
+
+    def quick_add_in_column(self, col_key: str):
+        col_names = {k: name for k, name, _ in COLUMNS}
+        dialog = ctk.CTkInputDialog(
+            text=f"Wpisz treść zadania dla kolumny „{col_names.get(col_key, '')}”\n(możesz użyć !wysoki / !niski oraz #tag):",
+            title="Dodaj zadanie w kolumnie",
+        )
+        raw = dialog.get_input()
+        if not raw or not raw.strip():
+            return
+        parsed = parse_quick_add(raw)
+        is_done_col = (col_key == "done")
+        new_task = {
+            "id": self._next_id(),
+            "tytul": parsed["tytul"],
+            "opis": "",
+            "termin": parsed["termin"] if is_done_col else (parsed["termin"] or target_date_for_column(col_key)),
+            "priorytet": parsed["priorytet"],
+            "wykonane": is_done_col,
+            "tagi": parsed["tagi"],
+        }
+        self.data["zadania"].append(new_task)
+        if is_done_col:
+            _, feedback = self.gamification.record_task_completed(new_task)
+            self.last_event_text = feedback
+        self.refresh_ui()
+
+    def move_task_to_column(self, task: dict, target_col: str):
+        col_names = {k: name for k, name, _ in COLUMNS}
+        if target_col == "done":
+            if not task.get("wykonane"):
+                task["wykonane"] = True
+                _, feedback = self.gamification.record_task_completed(task)
+                self.last_event_text = f"Ukończono „{task['tytul']}” → {feedback}"
+            self.refresh_ui()
+            return
+
+        was_done = task.get("wykonane", False)
+        task["wykonane"] = False
+        new_date = target_date_for_column(target_col)
+        task["termin"] = new_date
+        date_info = new_date if new_date else "null (brak terminu)"
+        prefix = "Przywrócono i przeniesiono" if was_done else "Przeniesiono"
+        self.last_event_text = f"{prefix} „{task['tytul']}” → {col_names.get(target_col)} (nowy termin: {date_info})."
+        self.refresh_ui()
+
+    def quick_add_on_date(self, date_str: str):
+        dialog = ctk.CTkInputDialog(
+            text=f"Wpisz treść zadania na dzień {date_str}\n(możesz użyć !wysoki / !niski oraz #tag):",
+            title="Dodaj zadanie w kalendarzu",
+        )
+        raw = dialog.get_input()
+        if not raw or not raw.strip():
+            return
+        parsed = parse_quick_add(raw)
+        new_task = {
+            "id": self._next_id(),
+            "tytul": parsed["tytul"],
+            "opis": "",
+            "termin": parsed["termin"] or date_str,
+            "priorytet": parsed["priorytet"],
+            "wykonane": False,
+            "tagi": parsed["tagi"],
+        }
+        self.data["zadania"].append(new_task)
+        self.last_event_text = f"Dodano zadanie „{new_task['tytul']}” na dzień {new_task['termin']}."
         self.refresh_ui()
 
     def toggle_task(self, task_id: int):
@@ -481,11 +748,67 @@ class SmartPlannerApp(ctk.CTk):
         self.date_filter_var.set("Termin: Wszystkie")
         self.tag_filter_var.set("Tag: Wszystkie")
         self.search_var.set("")
+
+    def _get_filtered_tasks(self) -> list[dict]:
+        mode = self.filter_mode.get()
+        prio_filter = self.prio_filter_var.get()
+        date_filter = self.date_filter_var.get()
+        tag_filter = self.tag_filter_var.get()
+        query = self.search_var.get().strip().lower()
+        today_str = date.today().isoformat()
+
+        result = []
+        for t in self.data["zadania"]:
+            if mode == "Do zrobienia" and t["wykonane"]:
+                continue
+            if mode == "Zrobione" and not t["wykonane"]:
+                continue
+            if mode == "Po terminie" and not is_overdue(t):
+                continue
+
+            if prio_filter != "Priorytet: Wszystkie" and t.get("priorytet") != prio_filter:
+                continue
+
+            termin_val = t.get("termin")
+            if date_filter == "Na dziś" and termin_val != today_str:
+                continue
+            if date_filter == "Po terminie" and not is_overdue(t):
+                continue
+            if date_filter == "Z terminem" and not termin_val:
+                continue
+            if date_filter == "Bez terminu (null)" and termin_val is not None:
+                continue
+
+            if tag_filter != "Tag: Wszystkie":
+                clean_tag = tag_filter.lstrip("#")
+                if clean_tag not in t.get("tagi", []):
+                    continue
+
+            if query:
+                q_no_hash = query.lstrip("#")
+                searchable = " ".join([
+                    f"id:{t.get('id', '')}",
+                    str(t.get("id", "")),
+                    t.get("tytul", "").lower(),
+                    t.get("opis", "").lower(),
+                    str(termin_val or "").lower(),
+                    t.get("priorytet", "").lower(),
+                    " ".join(t.get("tagi", [])).lower(),
+                ])
+                if query not in searchable and q_no_hash not in searchable:
+                    continue
+
+            result.append(t)
+        return result
+
     def refresh_ui(self):
         file_status = Path(self.current_file).name if self.current_file else "Brak wczytanego pliku"
         self.title(f"SmartApp — {file_status} (zadań: {len(self.data['zadania'])})")
 
-        # 1. Odśwież panel grywalizacji (Liga, Punkty, Streak, Cel tygodniowy)
+        # 1. Odśwież boczny pasek lig
+        self._render_sidebar()
+
+        # 2. Odśwież panel grywalizacji
         st = self.gamification.state
         league = self.gamification.get_league_info()
         self.league_badge.configure(text=f"🏆 LIGA: {league['name'].upper()}", fg_color=league["color"])
@@ -503,84 +826,56 @@ class SmartPlannerApp(ctk.CTk):
         self.goal_progress_bar.set(min(1.0, done_wk / goal_wk))
         self.gami_status_label.configure(text=self.last_event_text)
 
-        # 2. Odśwież kartę Smart Focus
+        # 3. Odśwież Smart Focus
         best_task, reason = get_smart_focus_task(self.data["zadania"])
         if best_task:
-            self.focus_label.configure(text=f"SMART FOCUS: {best_task['tytul']}\nPowód: {reason}")
+            self.focus_label.configure(text=f"SMART FOCUS: {best_task['tytul']}  •  Powód: {reason}")
             self.focus_done_btn.configure(state="normal", command=lambda tid=best_task["id"]: self.toggle_task(tid))
         else:
             self.focus_label.configure(text=f"SMART FOCUS: {reason}")
             self.focus_done_btn.configure(state="disabled")
 
-        # 3. Dynamiczna aktualizacja listy dostępnych tagów w menu filtrowania
+        # 4. Odśwież listę dostępnych tagów w menu filtrowania
         all_tags = sorted({tag for task in self.data["zadania"] for tag in task.get("tagi", [])})
         tag_options = ["Tag: Wszystkie"] + [f"#{tag}" for tag in all_tags]
         self.tag_filter_menu.configure(values=tag_options)
         if self.tag_filter_var.get() not in tag_options:
             self.tag_filter_var.set("Tag: Wszystkie")
 
-        # 4. Wyczyść obecną listę kart zadań
+        filtered_tasks = self._get_filtered_tasks()
+
+        # 5. Wyświetl wybrany widok: Tablica Kanban, Kalendarz lub Lista
+        current_view = self.view_mode.get()
+        if current_view == "Tablica":
+            self.task_list_frame.pack_forget()
+            self.calendar_view.pack_forget()
+            self.kanban_board.pack(fill="both", expand=True)
+            self.kanban_board.render(filtered_tasks)
+        elif current_view == "Kalendarz":
+            self.task_list_frame.pack_forget()
+            self.kanban_board.pack_forget()
+            self.calendar_view.pack(fill="both", expand=True)
+            self.calendar_view.render(filtered_tasks)
+        else:
+            self.kanban_board.pack_forget()
+            self.calendar_view.pack_forget()
+            self.task_list_frame.pack(fill="both", expand=True)
+            self._render_list_view(filtered_tasks)
+
+    def _render_list_view(self, tasks: list[dict]):
         for widget in self.task_list_frame.winfo_children():
             widget.destroy()
 
-        # 5. Pobierz aktywne kryteria filtrowania
-        mode = self.filter_mode.get()
-        prio_filter = self.prio_filter_var.get()
-        date_filter = self.date_filter_var.get()
-        tag_filter = self.tag_filter_var.get()
-        query = self.search_var.get().strip().lower()
-        today_str = date.today().isoformat()
-        shown_count = 0
+        if not tasks:
+            ctk.CTkLabel(
+                self.task_list_frame,
+                text="Brak zadań spełniających wybrane kryteria filtrowania.",
+                font=ctk.CTkFont(size=14),
+                text_color="#888888",
+            ).pack(pady=30)
+            return
 
-        # 6. Filtruj i renderuj zadania
-        for t in self.data["zadania"]:
-            # Filtr statusu (wykonane / po terminie)
-            if mode == "Do zrobienia" and t["wykonane"]:
-                continue
-            if mode == "Zrobione" and not t["wykonane"]:
-                continue
-            if mode == "Po terminie" and not is_overdue(t):
-                continue
-
-            # Filtr priorytetu
-            if prio_filter != "Priorytet: Wszystkie" and t.get("priorytet") != prio_filter:
-                continue
-
-            # Filtr terminu
-            termin_val = t.get("termin")
-            if date_filter == "Na dziś" and termin_val != today_str:
-                continue
-            if date_filter == "Po terminie" and not is_overdue(t):
-                continue
-            if date_filter == "Z terminem" and not termin_val:
-                continue
-            if date_filter == "Bez terminu (null)" and termin_val is not None:
-                continue
-
-            # Filtr tagu
-            if tag_filter != "Tag: Wszystkie":
-                clean_tag = tag_filter.lstrip("#")
-                if clean_tag not in t.get("tagi", []):
-                    continue
-
-            # Wyszukiwarka na żywo (id, tytul, opis, termin, priorytet, tagi)
-            if query:
-                q_no_hash = query.lstrip("#")
-                searchable = " ".join([
-                    f"id:{t.get('id', '')}",
-                    str(t.get("id", "")),
-                    t.get("tytul", "").lower(),
-                    t.get("opis", "").lower(),
-                    str(termin_val or "").lower(),
-                    t.get("priorytet", "").lower(),
-                    " ".join(t.get("tagi", [])).lower(),
-                ])
-                if query not in searchable and q_no_hash not in searchable:
-                    continue
-
-            shown_count += 1
-
-            # Karta pojedynczego zadania
+        for t in tasks:
             card = ctk.CTkFrame(self.task_list_frame)
             card.pack(fill="x", pady=4, padx=4)
 
@@ -606,6 +901,7 @@ class SmartPlannerApp(ctk.CTk):
             ).pack(anchor="w")
 
             pts_value = PRIORITY_POINTS.get(t["priorytet"], 4)
+            termin_val = t.get("termin")
             meta_parts = [f"ID: #{t['id']}", f"Priorytet: {t['priorytet'].upper()} (+{pts_value} pkt)"]
             if termin_val:
                 overdue_tag = " [PO TERMINIE]" if is_overdue(t) else ""
@@ -647,14 +943,6 @@ class SmartPlannerApp(ctk.CTk):
                 width=65,
                 command=lambda task=t: self.edit_task(task),
             ).pack(side="right", padx=4)
-
-        if shown_count == 0:
-            ctk.CTkLabel(
-                self.task_list_frame,
-                text="Brak zadań spełniających wybrane kryteria filtrowania.",
-                font=ctk.CTkFont(size=14),
-                text_color="#888888",
-            ).pack(pady=30)
 
 
 if __name__ == "__main__":
