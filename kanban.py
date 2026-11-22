@@ -1,20 +1,21 @@
 from datetime import date, datetime, timedelta
 import customtkinter as ctk
 from gamification import PRIORITY_POINTS
+from jarvis_theme import JARVIS
 
 COLUMNS = [
-    ("overdue", "Po terminie", "#e74c3c"),
-    ("today", "Na dziś", "#f1c40f"),
-    ("this_week", "Na ten tydzień", "#3498db"),
-    ("next_week", "Na przyszły tydzień", "#2980b9"),
-    ("no_date", "Brak terminu", "#7f8c8d"),
-    ("done", "Zrobione", "#27ae60"),
+    ("overdue", "Po terminie", "#a93226"),
+    ("today", "Na dziś", "#d4ac0d"),
+    ("this_week", "Na ten tydzień", "#2471a3"),
+    ("next_week", "Na przyszły tydzień", "#1b4f72"),
+    ("no_date", "Brak terminu", "#34495e"),
+    ("done", "Zrobione", "#1e8449"),
 ]
 
 PRIO_DOT_COLORS = {
-    "wysoki": "#e74c3c",
-    "sredni": "#f39c12",
-    "niski": "#2ecc71",
+    "wysoki": JARVIS["neon_red"],
+    "sredni": JARVIS["neon_amber"],
+    "niski": JARVIS["neon_green"],
 }
 
 
@@ -81,7 +82,13 @@ class KanbanBoardFrame(ctk.CTkFrame):
             self.grid_columnconfigure(idx, weight=1, uniform="kanban_col")
             self.grid_rowconfigure(0, weight=1)
 
-            col_box = ctk.CTkFrame(self, fg_color="#16202a", border_width=1, border_color="#2c3e50", corner_radius=8)
+            col_box = ctk.CTkFrame(
+                self,
+                fg_color=JARVIS["glass_panel"],
+                border_width=1,
+                border_color=JARVIS["border_subtle"],
+                corner_radius=8,
+            )
             col_box.grid(row=0, column=idx, sticky="nsew", padx=3, pady=2)
             self.col_containers[col_key] = col_box
 
@@ -90,7 +97,7 @@ class KanbanBoardFrame(ctk.CTkFrame):
             header_bar.pack(fill="x", padx=4, pady=(4, 2))
             header_bar.pack_propagate(False)
 
-            text_col = "#111111" if col_key == "today" else "#ffffff"
+            text_col = "#111111" if col_key == "today" else JARVIS["text_ice"]
             hdr_lbl = ctk.CTkLabel(
                 header_bar,
                 text=f"{title} (0)",
@@ -105,8 +112,11 @@ class KanbanBoardFrame(ctk.CTkFrame):
                 col_box,
                 text="+",
                 height=24,
-                fg_color="#22303c",
-                hover_color="#34495e",
+                fg_color=JARVIS["btn_glass_bg"],
+                hover_color=JARVIS["btn_glass_hover"],
+                border_width=1,
+                border_color=JARVIS["border_subtle"],
+                text_color=JARVIS["cyan"],
                 font=ctk.CTkFont(size=14, weight="bold"),
                 command=lambda ck=col_key: self.on_add_in_column(ck),
             )
@@ -147,9 +157,9 @@ class KanbanBoardFrame(ctk.CTkFrame):
         is_done = task.get("wykonane", False)
         card = ctk.CTkFrame(
             parent,
-            fg_color="#1b2c25" if is_done else "#263645",
+            fg_color="#07201b" if is_done else JARVIS["glass_panel_alt"],
             border_width=1,
-            border_color="#27ae60" if is_done else "#34495e",
+            border_color=JARVIS["neon_green"] if is_done else (JARVIS["neon_red"] if col_key == "overdue" else JARVIS["border_cyan"]),
             corner_radius=8,
         )
         card.pack(fill="x", pady=4, padx=2)
@@ -173,7 +183,7 @@ class KanbanBoardFrame(ctk.CTkFrame):
             top_row,
             text=title_str,
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#a3e4d7" if is_done else "#ffffff",
+            text_color=JARVIS["text_muted"] if is_done else JARVIS["text_ice"],
             wraplength=130,
             justify="left",
             anchor="w",
@@ -187,7 +197,7 @@ class KanbanBoardFrame(ctk.CTkFrame):
                 card,
                 text=task["opis"],
                 font=ctk.CTkFont(size=11),
-                text_color="#aeb6bf",
+                text_color=JARVIS["text_muted"],
                 wraplength=140,
                 justify="left",
                 anchor="w",
@@ -198,13 +208,13 @@ class KanbanBoardFrame(ctk.CTkFrame):
         pts = PRIORITY_POINTS.get(prio, 4)
         termin_txt = task.get("termin") or "Brak terminu"
         if is_done:
-            pill_color = "#1e8449"
+            pill_color = "#00553a"
             pill_txt = f"✓ {termin_txt}  •  +{pts} pkt"
         elif col_key == "overdue":
-            pill_color = "#c0392b"
+            pill_color = "#5a1520"
             pill_txt = f"🕒 {termin_txt}  •  +{pts} pkt"
         else:
-            pill_color = "#1b4f72"
+            pill_color = JARVIS["btn_cyan_bg"]
             pill_txt = f"🕒 {termin_txt}  •  +{pts} pkt"
 
         pill_lbl = ctk.CTkLabel(
@@ -213,7 +223,7 @@ class KanbanBoardFrame(ctk.CTkFrame):
             fg_color=pill_color,
             corner_radius=5,
             font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#ecf0f1",
+            text_color=JARVIS["text_ice"],
             padx=5,
             pady=1,
         )
@@ -227,10 +237,22 @@ class KanbanBoardFrame(ctk.CTkFrame):
                 card,
                 text=tags_str,
                 font=ctk.CTkFont(size=10),
-                text_color="#85c1e9",
+                text_color=JARVIS["cyan_dim"],
                 anchor="w",
             )
-            tags_lbl.pack(fill="x", padx=7, pady=(0, 3))
+            tags_lbl.pack(fill="x", padx=7, pady=(0, 2))
+
+        # Lokalizacja (jeśli jest)
+        loc_lbl = None
+        if task.get("lokalizacja"):
+            loc_lbl = ctk.CTkLabel(
+                card,
+                text=f"📍 {task['lokalizacja']}",
+                font=ctk.CTkFont(size=10),
+                text_color=JARVIS["cyan"],
+                anchor="w",
+            )
+            loc_lbl.pack(fill="x", padx=7, pady=(0, 3))
 
         # Dolny pasek szybkich akcji
         actions_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -242,8 +264,11 @@ class KanbanBoardFrame(ctk.CTkFrame):
             width=60,
             height=22,
             font=ctk.CTkFont(size=10, weight="bold"),
-            fg_color="#2e4053" if is_done else "#27ae60",
-            hover_color="#1e8449",
+            fg_color=JARVIS["btn_glass_bg"] if is_done else "#006655",
+            hover_color=JARVIS["btn_glass_hover"] if is_done else "#008870",
+            border_width=1,
+            border_color=JARVIS["border_subtle"] if is_done else JARVIS["neon_green"],
+            text_color=JARVIS["text_ice"] if is_done else "#ffffff",
             command=lambda tid=task["id"]: self.on_toggle_task(tid),
         ).pack(side="left", padx=2)
 
@@ -253,8 +278,11 @@ class KanbanBoardFrame(ctk.CTkFrame):
             width=22,
             height=22,
             font=ctk.CTkFont(size=10),
-            fg_color="#922b21",
-            hover_color="#641e16",
+            fg_color="#5a1520",
+            hover_color="#7a202c",
+            border_width=1,
+            border_color=JARVIS["neon_red"],
+            text_color="#ffffff",
             command=lambda tid=task["id"]: self.on_delete_task(tid),
         ).pack(side="right", padx=1)
 
@@ -264,7 +292,11 @@ class KanbanBoardFrame(ctk.CTkFrame):
             width=22,
             height=22,
             font=ctk.CTkFont(size=10),
-            fg_color="#34495e",
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=lambda tk=task: self.on_edit_task(tk),
         ).pack(side="right", padx=1)
 
@@ -274,6 +306,8 @@ class KanbanBoardFrame(ctk.CTkFrame):
             draggable_widgets.append(desc_lbl)
         if tags_lbl:
             draggable_widgets.append(tags_lbl)
+        if loc_lbl:
+            draggable_widgets.append(loc_lbl)
 
         for w in draggable_widgets:
             w.bind("<ButtonPress-1>", lambda e, tk=task: self._start_drag(e, tk))

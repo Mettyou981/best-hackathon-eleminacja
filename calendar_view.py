@@ -2,6 +2,7 @@ import calendar
 from datetime import date
 import customtkinter as ctk
 from gamification import PRIORITY_POINTS
+from jarvis_theme import JARVIS
 
 POLISH_MONTHS = [
     "",
@@ -31,9 +32,9 @@ POLISH_DAYS_FULL = [
 ]
 
 PRIO_PILL_COLORS = {
-    "wysoki": "#c0392b",
-    "sredni": "#d68910",
-    "niski": "#239b56",
+    "wysoki": "#991b2c",
+    "sredni": "#a05a00",
+    "niski": "#006644",
 }
 
 
@@ -60,11 +61,17 @@ class CalendarViewFrame(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
 
         # === LEWA KOLUMNA: NAWIGACJA + SIATKA MIESIĄCA ===
-        left_panel = ctk.CTkFrame(self, fg_color="#16202a", border_width=1, border_color="#2c3e50", corner_radius=8)
+        left_panel = ctk.CTkFrame(
+            self,
+            fg_color=JARVIS["glass_panel"],
+            border_width=1,
+            border_color=JARVIS["border_cyan"],
+            corner_radius=8,
+        )
         left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=2)
 
         # Górny pasek nawigacji miesiąca i legenda kolorów
-        nav_bar = ctk.CTkFrame(left_panel, fg_color="#1b2631", corner_radius=6)
+        nav_bar = ctk.CTkFrame(left_panel, fg_color=JARVIS["glass_panel_alt"], corner_radius=6)
         nav_bar.pack(fill="x", padx=8, pady=(8, 4))
 
         ctk.CTkButton(
@@ -72,8 +79,11 @@ class CalendarViewFrame(ctk.CTkFrame):
             text="◀",
             width=34,
             height=28,
-            fg_color="#2c3e50",
-            hover_color="#34495e",
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self._prev_month,
         ).pack(side="left", padx=(8, 4), pady=6)
 
@@ -82,7 +92,11 @@ class CalendarViewFrame(ctk.CTkFrame):
             text="Dzisiaj",
             width=65,
             height=28,
-            fg_color="#2980b9",
+            fg_color=JARVIS["btn_cyan_bg"],
+            hover_color=JARVIS["btn_cyan_hover"],
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            text_color=JARVIS["text_ice"],
             command=self._go_today,
         ).pack(side="left", padx=4, pady=6)
 
@@ -91,8 +105,11 @@ class CalendarViewFrame(ctk.CTkFrame):
             text="▶",
             width=34,
             height=28,
-            fg_color="#2c3e50",
-            hover_color="#34495e",
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self._next_month,
         ).pack(side="left", padx=(4, 12), pady=6)
 
@@ -100,6 +117,7 @@ class CalendarViewFrame(ctk.CTkFrame):
             nav_bar,
             text="",
             font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=JARVIS["cyan"],
         )
         self.month_title_label.pack(side="left", padx=6)
 
@@ -108,9 +126,9 @@ class CalendarViewFrame(ctk.CTkFrame):
         legend_frame.pack(side="right", padx=8)
 
         legend_items = [
-            ("● Wysoki", "#e74c3c"),
-            ("● Średni", "#f39c12"),
-            ("● Niski", "#2ecc71"),
+            ("● Wysoki", JARVIS["neon_red"]),
+            ("● Średni", JARVIS["neon_amber"]),
+            ("● Niski", JARVIS["neon_green"]),
             ("✓ Zrobione", "#52be80"),
         ]
         for lbl_txt, col in legend_items:
@@ -132,8 +150,8 @@ class CalendarViewFrame(ctk.CTkFrame):
                 days_header,
                 text=day_name,
                 font=ctk.CTkFont(size=12, weight="bold"),
-                text_color="#f5b7b1" if is_weekend else "#85c1e9",
-                fg_color="#1f2d3a" if is_weekend else "#1b2631",
+                text_color=JARVIS["neon_red"] if is_weekend else JARVIS["cyan_dim"],
+                fg_color=JARVIS["glass_panel_alt"],
                 corner_radius=5,
                 height=26,
             )
@@ -147,21 +165,22 @@ class CalendarViewFrame(ctk.CTkFrame):
         right_panel = ctk.CTkFrame(
             self,
             width=350,
-            fg_color="#16202a",
+            fg_color=JARVIS["glass_panel"],
             border_width=1,
-            border_color="#2c3e50",
+            border_color=JARVIS["border_cyan"],
             corner_radius=8,
         )
         right_panel.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=2)
         right_panel.pack_propagate(False)
 
-        day_hdr_box = ctk.CTkFrame(right_panel, fg_color="#1f2d3d", corner_radius=6)
+        day_hdr_box = ctk.CTkFrame(right_panel, fg_color=JARVIS["glass_panel_alt"], corner_radius=6)
         day_hdr_box.pack(fill="x", padx=10, pady=(10, 6))
 
         self.selected_day_title = ctk.CTkLabel(
             day_hdr_box,
             text="",
             font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=JARVIS["cyan"],
             anchor="w",
         )
         self.selected_day_title.pack(fill="x", padx=10, pady=(8, 2))
@@ -170,7 +189,7 @@ class CalendarViewFrame(ctk.CTkFrame):
             day_hdr_box,
             text="",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#85c1e9",
+            text_color=JARVIS["text_ice"],
             anchor="w",
             wraplength=310,
             justify="left",
@@ -181,8 +200,11 @@ class CalendarViewFrame(ctk.CTkFrame):
             right_panel,
             text="+ Dodaj zadanie na ten dzień",
             height=30,
-            fg_color="#2980b9",
-            hover_color="#1f618d",
+            fg_color=JARVIS["btn_cyan_bg"],
+            hover_color=JARVIS["btn_cyan_hover"],
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            text_color=JARVIS["text_ice"],
             font=ctk.CTkFont(size=12, weight="bold"),
             command=lambda: self.on_add_on_date(self.selected_date.isoformat()),
         ).pack(fill="x", padx=10, pady=(0, 6))
@@ -271,16 +293,16 @@ class CalendarViewFrame(ctk.CTkFrame):
                 is_weekend = (c_idx >= 5)
 
                 if is_selected:
-                    bg_color = "#1f3044"
-                    border_color = "#f1c40f"
+                    bg_color = JARVIS["glass_panel_focus"]
+                    border_color = JARVIS["cyan"]
                     border_w = 2
                 elif is_today:
-                    bg_color = "#1b2e42"
-                    border_color = "#3498db"
+                    bg_color = JARVIS["glass_panel_alt"]
+                    border_color = JARVIS["border_cyan"]
                     border_w = 2
                 else:
-                    bg_color = "#18222d" if is_weekend else "#1c2836"
-                    border_color = "#2c3e50"
+                    bg_color = JARVIS["input_bg"] if is_weekend else JARVIS["glass_panel"]
+                    border_color = JARVIS["border_subtle"]
                     border_w = 1
 
                 cell = ctk.CTkFrame(
@@ -397,9 +419,9 @@ class CalendarViewFrame(ctk.CTkFrame):
 
             card = ctk.CTkFrame(
                 self.day_tasks_scroll,
-                fg_color="#1b2c25" if is_done else "#22303c",
+                fg_color="#07201b" if is_done else JARVIS["glass_panel_alt"],
                 border_width=1,
-                border_color="#27ae60" if is_done else PRIO_PILL_COLORS.get(prio, "#34495e"),
+                border_color=JARVIS["neon_green"] if is_done else JARVIS["border_cyan"],
                 corner_radius=8,
             )
             card.pack(fill="x", pady=5, padx=4)
@@ -412,7 +434,7 @@ class CalendarViewFrame(ctk.CTkFrame):
                 top_r,
                 text=f"ID #{t['id']}",
                 font=ctk.CTkFont(size=11, weight="bold"),
-                text_color="#85929e",
+                text_color=JARVIS["cyan_dim"],
             ).pack(side="left")
 
             badge = ctk.CTkLabel(
@@ -421,7 +443,7 @@ class CalendarViewFrame(ctk.CTkFrame):
                 fg_color=PRIO_PILL_COLORS.get(prio, "#555555"),
                 corner_radius=4,
                 font=ctk.CTkFont(size=10, weight="bold"),
-                text_color="#ffffff",
+                text_color=JARVIS["text_ice"],
                 padx=7,
                 pady=1,
             )
@@ -432,7 +454,7 @@ class CalendarViewFrame(ctk.CTkFrame):
                 card,
                 text=f"✓ {t['tytul']}" if is_done else t["tytul"],
                 font=ctk.CTkFont(size=13, weight="bold"),
-                text_color="#a3e4d7" if is_done else "#ffffff",
+                text_color=JARVIS["text_muted"] if is_done else JARVIS["text_ice"],
                 wraplength=280,
                 justify="left",
                 anchor="w",
@@ -444,7 +466,7 @@ class CalendarViewFrame(ctk.CTkFrame):
                     card,
                     text=t["opis"],
                     font=ctk.CTkFont(size=11),
-                    text_color="#bdc3c7",
+                    text_color=JARVIS["text_muted"],
                     wraplength=280,
                     justify="left",
                     anchor="w",
@@ -455,7 +477,18 @@ class CalendarViewFrame(ctk.CTkFrame):
                     card,
                     text=" ".join(f"#{tg}" for tg in t["tagi"]),
                     font=ctk.CTkFont(size=10),
-                    text_color="#85c1e9",
+                    text_color=JARVIS["cyan_dim"],
+                    wraplength=280,
+                    justify="left",
+                    anchor="w",
+                ).pack(fill="x", padx=9, pady=(0, 2))
+
+            if t.get("lokalizacja"):
+                ctk.CTkLabel(
+                    card,
+                    text=f"📍 {t['lokalizacja']}",
+                    font=ctk.CTkFont(size=10),
+                    text_color=JARVIS["cyan"],
                     wraplength=280,
                     justify="left",
                     anchor="w",
@@ -470,8 +503,11 @@ class CalendarViewFrame(ctk.CTkFrame):
                 width=82,
                 height=24,
                 font=ctk.CTkFont(size=11, weight="bold"),
-                fg_color="#2e4053" if is_done else "#27ae60",
-                hover_color="#1e8449",
+                fg_color=JARVIS["btn_glass_bg"] if is_done else "#006655",
+                hover_color=JARVIS["btn_glass_hover"] if is_done else "#008870",
+                border_width=1,
+                border_color=JARVIS["border_subtle"] if is_done else JARVIS["neon_green"],
+                text_color=JARVIS["text_ice"] if is_done else "#ffffff",
                 command=lambda tid=t["id"]: self.on_toggle_task(tid),
             ).pack(side="left", padx=2)
 
@@ -481,8 +517,11 @@ class CalendarViewFrame(ctk.CTkFrame):
                 width=26,
                 height=24,
                 font=ctk.CTkFont(size=11),
-                fg_color="#922b21",
-                hover_color="#641e16",
+                fg_color="#5a1520",
+                hover_color="#7a202c",
+                border_width=1,
+                border_color=JARVIS["neon_red"],
+                text_color="#ffffff",
                 command=lambda tid=t["id"]: self.on_delete_task(tid),
             ).pack(side="right", padx=2)
 
@@ -492,6 +531,10 @@ class CalendarViewFrame(ctk.CTkFrame):
                 width=26,
                 height=24,
                 font=ctk.CTkFont(size=11),
-                fg_color="#34495e",
+                fg_color=JARVIS["btn_glass_bg"],
+                hover_color=JARVIS["btn_glass_hover"],
+                border_width=1,
+                border_color=JARVIS["border_subtle"],
+                text_color=JARVIS["text_ice"],
                 command=lambda tk=t: self.on_edit_task(tk),
             ).pack(side="right", padx=2)

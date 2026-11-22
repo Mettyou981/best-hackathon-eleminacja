@@ -1,10 +1,11 @@
 {
-  "points": 25,
+  "points": 15,
   "points_this_week": 0,
   "streak": 0,
   "weekly_goal": 3,
   "goal_set_for_week": "2026-W47",
   "active_week": "2026-W47",
   "completed_this_week": 0,
+  "pomodoro_sessions": 0,
   "rewarded_tasks": []
 }

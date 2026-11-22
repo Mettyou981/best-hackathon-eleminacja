@@ -2,11 +2,11 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-from datetime import date
+from datetime import date, timedelta
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-from storage import load_tasks, save_tasks
-from smart import parse_quick_add, get_smart_focus_task, is_overdue
+from storage import load_tasks, save_tasks, load_locations, save_locations
+from smart import parse_quick_add, get_smart_focus_task, is_overdue, parse_coordinates, KNOWN_CITIES
 from gamification import (
     GamificationManager,
     PRIORITY_POINTS,
@@ -16,19 +16,21 @@ from gamification import (
 )
 from kanban import KanbanBoardFrame, COLUMNS, target_date_for_column
 from calendar_view import CalendarViewFrame
+from globe_view import GlobeViewFrame
 from reports_and_alerts import (
     export_weekly_summary_pdf,
     get_upcoming_24h_tasks,
     send_system_notification,
 )
+from jarvis_theme import JARVIS, JarvisParticleCanvas, JarvisArcReactor, get_inspo_image
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 PRIO_COLORS = {
-    "wysoki": "#e74c3c",
-    "sredni": "#f39c12",
-    "niski": "#2ecc71",
+    "wysoki": JARVIS["neon_red"],
+    "sredni": JARVIS["neon_amber"],
+    "niski": JARVIS["neon_green"],
 }
 
 POMODORO_WORK_SECONDS = 25 * 60
@@ -41,6 +43,7 @@ class WeeklyGoalDialog(ctk.CTkToplevel):
         self.title("Cel na ten tydzień")
         self.geometry("400x260")
         self.resizable(False, False)
+        self.configure(fg_color=JARVIS["glass_panel"])
         self.grab_set()
         self.on_confirm = on_confirm
         self.confirmed = False
@@ -49,19 +52,28 @@ class WeeklyGoalDialog(ctk.CTkToplevel):
             self,
             text="Jaki masz cel zadań na ten tydzień?",
             font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=JARVIS["cyan"],
         ).pack(pady=(20, 6))
 
         ctk.CTkLabel(
             self,
             text="Planuj z wyprzedzeniem: niski priorytet = 5 pkt,\nśredni = 4 pkt, wysoki = 3 pkt.",
             font=ctk.CTkFont(size=12),
-            text_color="#aaaaaa",
+            text_color=JARVIS["text_muted"],
         ).pack(pady=(0, 12))
 
         presets_frame = ctk.CTkFrame(self, fg_color="transparent")
         presets_frame.pack(pady=4)
 
-        self.goal_entry = ctk.CTkEntry(self, width=120, justify="center", font=ctk.CTkFont(size=15, weight="bold"))
+        self.goal_entry = ctk.CTkEntry(
+            self,
+            width=120,
+            justify="center",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
         self.goal_entry.insert(0, str(current_goal))
         self.goal_entry.pack(pady=8)
 
@@ -70,11 +82,25 @@ class WeeklyGoalDialog(ctk.CTkToplevel):
                 presets_frame,
                 text=f"{val} zad.",
                 width=65,
-                fg_color="#34495e",
+                fg_color=JARVIS["btn_glass_bg"],
+                hover_color=JARVIS["btn_glass_hover"],
+                border_width=1,
+                border_color=JARVIS["border_subtle"],
+                text_color=JARVIS["text_ice"],
                 command=lambda v=val: self._set_preset(v),
             ).pack(side="left", padx=4)
 
-        ctk.CTkButton(self, text="Zatwierdź cel", width=160, command=self._save).pack(pady=(10, 15))
+        ctk.CTkButton(
+            self,
+            text="Zatwierdź cel",
+            width=160,
+            fg_color=JARVIS["btn_cyan_bg"],
+            hover_color=JARVIS["btn_cyan_hover"],
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            text_color=JARVIS["text_ice"],
+            command=self._save,
+        ).pack(pady=(10, 15))
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _set_preset(self, val: int):
@@ -107,38 +133,92 @@ class EditDialog(ctk.CTkToplevel):
     def __init__(self, parent, task: dict, on_save):
         super().__init__(parent)
         self.title(f"Edycja zadania #{task['id']}")
-        self.geometry("420x430")
+        self.geometry("420x510")
+        self.configure(fg_color=JARVIS["glass_panel"])
         self.grab_set()
         self.task = task
         self.on_save = on_save
 
-        ctk.CTkLabel(self, text="Tytuł:").pack(anchor="w", padx=20, pady=(15, 2))
-        self.title_entry = ctk.CTkEntry(self, width=380)
+        ctk.CTkLabel(self, text="Tytuł:", text_color=JARVIS["cyan"]).pack(anchor="w", padx=20, pady=(15, 2))
+        self.title_entry = ctk.CTkEntry(
+            self,
+            width=380,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
         self.title_entry.insert(0, task["tytul"])
         self.title_entry.pack(padx=20)
 
-        ctk.CTkLabel(self, text="Opis:").pack(anchor="w", padx=20, pady=(10, 2))
-        self.desc_entry = ctk.CTkEntry(self, width=380)
+        ctk.CTkLabel(self, text="Opis:", text_color=JARVIS["cyan"]).pack(anchor="w", padx=20, pady=(10, 2))
+        self.desc_entry = ctk.CTkEntry(
+            self,
+            width=380,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
         self.desc_entry.insert(0, task.get("opis", ""))
         self.desc_entry.pack(padx=20)
 
-        ctk.CTkLabel(self, text="Termin (RRRR-MM-DD lub puste):").pack(anchor="w", padx=20, pady=(10, 2))
-        self.date_entry = ctk.CTkEntry(self, width=380)
+        ctk.CTkLabel(self, text="Termin (RRRR-MM-DD lub puste):", text_color=JARVIS["cyan"]).pack(anchor="w", padx=20, pady=(10, 2))
+        self.date_entry = ctk.CTkEntry(
+            self,
+            width=380,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
         if task.get("termin"):
             self.date_entry.insert(0, task["termin"])
         self.date_entry.pack(padx=20)
 
-        ctk.CTkLabel(self, text="Priorytet:").pack(anchor="w", padx=20, pady=(10, 2))
-        self.prio_menu = ctk.CTkOptionMenu(self, values=["niski", "sredni", "wysoki"], width=380)
+        ctk.CTkLabel(self, text="Priorytet:", text_color=JARVIS["cyan"]).pack(anchor="w", padx=20, pady=(10, 2))
+        self.prio_menu = ctk.CTkOptionMenu(
+            self,
+            values=["niski", "sredni", "wysoki"],
+            width=380,
+            fg_color=JARVIS["input_bg"],
+            button_color=JARVIS["btn_cyan_bg"],
+            button_hover_color=JARVIS["btn_cyan_hover"],
+            text_color=JARVIS["text_ice"],
+        )
         self.prio_menu.set(task.get("priorytet", "sredni"))
         self.prio_menu.pack(padx=20)
 
-        ctk.CTkLabel(self, text="Tagi (oddzielone przecinkiem):").pack(anchor="w", padx=20, pady=(10, 2))
-        self.tags_entry = ctk.CTkEntry(self, width=380)
+        ctk.CTkLabel(self, text="Tagi (oddzielone przecinkiem):", text_color=JARVIS["cyan"]).pack(anchor="w", padx=20, pady=(10, 2))
+        self.tags_entry = ctk.CTkEntry(
+            self,
+            width=380,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
         self.tags_entry.insert(0, ", ".join(task.get("tagi", [])))
         self.tags_entry.pack(padx=20)
 
-        ctk.CTkButton(self, text="Zapisz zmiany", command=self.save).pack(pady=20)
+        ctk.CTkLabel(self, text="Lokalizacja (np. 52.23, 21.01 lub Warszawa):", text_color=JARVIS["cyan"]).pack(anchor="w", padx=20, pady=(10, 2))
+        self.loc_entry = ctk.CTkEntry(
+            self,
+            width=380,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
+        if task.get("lokalizacja"):
+            self.loc_entry.insert(0, str(task["lokalizacja"]))
+        self.loc_entry.pack(padx=20)
+
+        ctk.CTkButton(
+            self,
+            text="Zapisz zmiany",
+            fg_color=JARVIS["btn_cyan_bg"],
+            hover_color=JARVIS["btn_cyan_hover"],
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            text_color=JARVIS["text_ice"],
+            command=self.save,
+        ).pack(pady=18)
 
     def save(self):
         new_title = self.title_entry.get().strip()
@@ -151,6 +231,21 @@ class EditDialog(ctk.CTkToplevel):
         self.task["termin"] = raw_date if raw_date else None
         self.task["priorytet"] = self.prio_menu.get()
         self.task["tagi"] = [t.strip() for t in self.tags_entry.get().split(",") if t.strip()]
+        
+        # Lokalizacja zapisywana jest OSOBNO w lokalizacje.json, nie w pliku JSON zadań
+        raw_loc = self.loc_entry.get().strip()
+        if hasattr(self.master, "locations"):
+            tid = int(self.task["id"])
+            if raw_loc:
+                self.master.locations[tid] = raw_loc
+                self.task["lokalizacja"] = raw_loc
+            else:
+                self.master.locations.pop(tid, None)
+                self.task["lokalizacja"] = None
+            save_locations(self.master.locations, self.master.locations_path)
+        else:
+            self.task["lokalizacja"] = raw_loc if raw_loc else None
+
         self.on_save()
         self.destroy()
 
@@ -158,9 +253,13 @@ class EditDialog(ctk.CTkToplevel):
 class SmartPlannerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.geometry("1350x800")
+        self.geometry("1500x900")
+        self.configure(fg_color=JARVIS["bg_root"])
 
         base_dir = Path(__file__).resolve().parent
+        self.locations_path = base_dir / "lokalizacje.json"
+        self.locations = load_locations(self.locations_path)
+
         default_path = base_dir / "zadania.json"
         if default_path.exists():
             try:
@@ -173,6 +272,8 @@ class SmartPlannerApp(ctk.CTk):
             self.data = {"wersja": 1, "zadania": []}
             self.current_file = None
 
+        self._link_locations_to_tasks()
+
         self.sidebar_visible = False
         self.bind("<Escape>", lambda _: self.toggle_sidebar() if self.sidebar_visible else None)
 
@@ -183,7 +284,7 @@ class SmartPlannerApp(ctk.CTk):
         self.pomo_after_id: str | None = None
         self.current_focus_task: dict | None = None
 
-        self.view_mode = ctk.StringVar(value="Tablica")
+        self.view_mode = ctk.StringVar(value="📋 Tablica")
         self.filter_mode = ctk.StringVar(value="Wszystkie")
         self.search_var = ctk.StringVar(value="")
         self.search_var.trace_add("write", lambda *_: self.refresh_ui())
@@ -206,6 +307,19 @@ class SmartPlannerApp(ctk.CTk):
         if self.gamification.needs_weekly_goal_prompt():
             self.open_goal_dialog()
         self.check_deadline_notifications(manual=False)
+
+    def _link_locations_to_tasks(self):
+        """Łączy zadania w pamięci z osobnym plikiem lokalizacje.json bez modyfikowania struktury pliku JSON zadań."""
+        for t in self.data.get("zadania", []):
+            try:
+                tid = int(t.get("id", 0))
+            except (ValueError, TypeError):
+                continue
+            loc = self.locations.get(tid)
+            if loc:
+                t["lokalizacja"] = loc
+            elif "lokalizacja" not in t:
+                t["lokalizacja"] = None
 
     def check_deadline_notifications(self, manual: bool = True):
         """Sprawdza zadania z terminem do 24h (dziś/jutro) oraz zaległe i wysyła powiadomienie systemowe."""
@@ -388,32 +502,39 @@ class SmartPlannerApp(ctk.CTk):
         if self.sidebar_visible:
             self.sidebar_frame.place_forget()
             self.sidebar_visible = False
-            self.sidebar_toggle_btn.configure(text="▶ Ligi")
         else:
             self.sidebar_frame.place(x=0, y=0, relheight=1.0)
             self.sidebar_frame.lift()
             self.sidebar_visible = True
-            self.sidebar_toggle_btn.configure(text="◀ Ligi")
 
     def _build_ui(self):
+        # Maksymalna szerokość kontenera centralnego
+        self._max_content_width = 1200
+
+        # === TŁO CZĄSTECZKOWE JARVIS PLEXUS (ANIMACJA PARTICLES W TLE) ===
+        # Umieszczone w oknie głównym za kontenerami półprzezroczystymi
+        self.particle_canvas = JarvisParticleCanvas(self, num_particles=70)
+        self.particle_canvas.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+
         # === LEWY WYSUWANY PASEK BOCZNY NA LIGI (NAKŁADKA OVERLAY) ===
         self.sidebar_frame = ctk.CTkFrame(
             self,
             width=265,
-            fg_color="#121a22",
+            fg_color=JARVIS["glass_panel"],
             border_width=2,
-            border_color="#3498db",
+            border_color=JARVIS["cyan"],
             corner_radius=0,
         )
         self.sidebar_frame.pack_propagate(False)
 
-        sb_header = ctk.CTkFrame(self.sidebar_frame, fg_color="#1a2530", corner_radius=0)
+        sb_header = ctk.CTkFrame(self.sidebar_frame, fg_color=JARVIS["glass_panel_alt"], corner_radius=0)
         sb_header.pack(fill="x")
 
         ctk.CTkLabel(
             sb_header,
             text=f"🏆 Ligi ({len(LEAGUES)})",
             font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=JARVIS["cyan"],
         ).pack(side="left", padx=12, pady=12)
 
         ctk.CTkButton(
@@ -421,8 +542,11 @@ class SmartPlannerApp(ctk.CTk):
             text="◀",
             width=30,
             height=28,
-            fg_color="#2c3e50",
-            hover_color="#34495e",
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self.toggle_sidebar,
         ).pack(side="right", padx=10, pady=10)
 
@@ -430,7 +554,7 @@ class SmartPlannerApp(ctk.CTk):
             self.sidebar_frame,
             text="",
             font=ctk.CTkFont(size=12),
-            text_color="#85c1e9",
+            text_color=JARVIS["text_cyan"],
             justify="left",
             anchor="w",
         )
@@ -439,7 +563,13 @@ class SmartPlannerApp(ctk.CTk):
         self.sb_leagues_scroll = ctk.CTkScrollableFrame(self.sidebar_frame, fg_color="transparent")
         self.sb_leagues_scroll.pack(fill="both", expand=True, padx=6, pady=4)
 
-        rules_box = ctk.CTkFrame(self.sidebar_frame, fg_color="#19232d", corner_radius=8)
+        rules_box = ctk.CTkFrame(
+            self.sidebar_frame,
+            fg_color=JARVIS["glass_panel_alt"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            corner_radius=8,
+        )
         rules_box.pack(fill="x", padx=10, pady=10)
         ctk.CTkLabel(
             rules_box,
@@ -452,288 +582,567 @@ class SmartPlannerApp(ctk.CTk):
                 f"• Brak celu w tyg.: -{INACTIVITY_PENALTY} pkt"
             ),
             font=ctk.CTkFont(size=11),
-            text_color="#aeb6bf",
+            text_color=JARVIS["text_ice"],
             justify="left",
             anchor="w",
         ).pack(fill="x", padx=10, pady=8)
 
-        # === GŁÓWNY KONTENER TREŚCI (ZAWSZE PEŁNA SZEROKOŚĆ) ===
+        # === GŁÓWNY KONTENER ===
         self.main_container = ctk.CTkFrame(self, fg_color="transparent")
         self.main_container.pack(fill="both", expand=True)
+        self.main_container.lift()
 
-        # Górny pasek narzędziowy (przejrzysty, bez ściskania przycisków)
-        top_bar = ctk.CTkFrame(self.main_container)
-        top_bar.pack(fill="x", padx=15, pady=(12, 5))
+        # Centralny kontener z ograniczoną szerokością
+        self.center_wrapper = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.center_wrapper.pack(expand=True, fill="both")
 
-        self.sidebar_toggle_btn = ctk.CTkButton(
-            top_bar,
-            text="▶ Ligi",
-            width=70,
-            height=30,
-            fg_color="#2c3e50",
-            hover_color="#34495e",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self.toggle_sidebar,
+        self.content_frame = ctk.CTkFrame(self.center_wrapper, fg_color="transparent", width=self._max_content_width)
+        self.content_frame.pack(expand=True, fill="both", padx=30, pady=0)
+
+        # === GÓRNY PASEK — Arc Reactor HUD + Tytuł + Data + Przyciski Glass ===
+        top_bar = ctk.CTkFrame(
+            self.content_frame,
+            fg_color=JARVIS["glass_panel"],
+            border_width=1,
+            border_color=JARVIS["border_cyan"],
+            corner_radius=10,
         )
-        self.sidebar_toggle_btn.pack(side="left", padx=(10, 6), pady=8)
+        top_bar.pack(fill="x", pady=(14, 0))
+
+        # Miniaturowy obracający się Reaktor Łukowy HUD (kółko) obok tytułu aplikacji
+        self.arc_reactor = JarvisArcReactor(top_bar, size=38, bg=JARVIS["glass_panel"])
+        self.arc_reactor.pack(side="left", padx=(12, 6), pady=6)
 
         ctk.CTkLabel(
             top_bar,
             text="PODSIECIOWE MASKARADY",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(side="left", padx=6, pady=8)
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=JARVIS["cyan"],
+        ).pack(side="left", padx=(0, 14), pady=10)
 
-        # Przełącznik widoku Tablica (Kanban) / Kalendarz / Lista
-        ctk.CTkSegmentedButton(
+        # Wycentrowana data w top_barze z wyróżniającą się plakietką (tak jak na szkicu)
+        dni_tyg = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+        dzis = date.today()
+        _, nr_tygodnia, _ = dzis.isocalendar()
+
+        date_center = ctk.CTkFrame(
             top_bar,
-            values=["Tablica", "Kalendarz", "Lista"],
-            variable=self.view_mode,
-            command=lambda _: self.refresh_ui(),
-        ).pack(side="left", padx=10, pady=8)
+            fg_color=JARVIS["glass_panel_alt"],
+            corner_radius=8,
+            border_width=1,
+            border_color=JARVIS["border_cyan"],
+        )
+        date_center.pack(side="left", expand=True, pady=6)
 
-        ctk.CTkButton(top_bar, text="Zapisz jako JSON", width=115, command=self.export_json).pack(side="right", padx=(4, 10), pady=8)
-        ctk.CTkButton(top_bar, text="Zapisz JSON", width=95, command=self.save_current_json).pack(side="right", padx=4, pady=8)
-        ctk.CTkButton(top_bar, text="Wczytaj JSON", width=105, fg_color="#2980b9", command=self.import_json).pack(side="right", padx=4, pady=8)
+        ctk.CTkLabel(
+            date_center,
+            text=f"📅  {dni_tyg[dzis.weekday()]}, {dzis.strftime('%d.%m.%Y')}",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=JARVIS["text_ice"],
+        ).pack(side="left", padx=(12, 8), pady=5)
+
+        ctk.CTkLabel(
+            date_center,
+            text=f"Tydzień #{nr_tygodnia}",
+            fg_color=JARVIS["btn_cyan_bg"],
+            text_color=JARVIS["text_ice"],
+            corner_radius=5,
+            padx=8,
+            pady=2,
+            font=ctk.CTkFont(size=11, weight="bold"),
+        ).pack(side="left", padx=(0, 10), pady=5)
+
+        # Przyciski po prawej — półprzezroczyste szklane przyciski z delikatnym obramowaniem
+        ctk.CTkButton(
+            top_bar,
+            text="Zapisz jako JSON",
+            width=115,
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
+            command=self.export_json,
+        ).pack(side="right", padx=(4, 14), pady=10)
+
+        ctk.CTkButton(
+            top_bar,
+            text="Zapisz JSON",
+            width=95,
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
+            command=self.save_current_json,
+        ).pack(side="right", padx=4, pady=10)
+
+        ctk.CTkButton(
+            top_bar,
+            text="Wczytaj JSON",
+            width=105,
+            fg_color=JARVIS["btn_cyan_bg"],
+            hover_color=JARVIS["btn_cyan_hover"],
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            text_color=JARVIS["text_ice"],
+            command=self.import_json,
+        ).pack(side="right", padx=4, pady=10)
+
         ctk.CTkButton(
             top_bar,
             text="📄 Raport PDF",
             width=105,
-            fg_color="#8e44ad",
-            hover_color="#732d91",
+            fg_color="#3a1c54",
+            hover_color="#532777",
+            border_width=1,
+            border_color="#9b59b6",
+            text_color=JARVIS["text_ice"],
             command=self.export_weekly_pdf,
-        ).pack(side="right", padx=4, pady=8)
+        ).pack(side="right", padx=4, pady=10)
+
         ctk.CTkButton(
             top_bar,
             text="🔔",
             width=36,
-            fg_color="#34495e",
-            hover_color="#2c3e50",
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=lambda: self.check_deadline_notifications(manual=True),
-        ).pack(side="right", padx=4, pady=8)
+        ).pack(side="right", padx=4, pady=10)
 
-        # Pasek z dzisiejszą datą + pełny przełącznik statusu zadań (zero ucinania napisów)
-        dni_tyg = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
-        dzis = date.today()
-        _, nr_tygodnia, _ = dzis.isocalendar()
-        date_text = f"📅 Dzisiaj: {dni_tyg[dzis.weekday()]}, {dzis.strftime('%d.%m.%Y')}  |  Tydzień #{nr_tygodnia}"
+        # === TRZY KAFELKI W JEDNYM RZĘDZIE ===
+        # Dodawanie zadania jest znacznie szersze (weight=5), a Liga i Smart Focus węższe (weight=3)
+        tiles_row = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        tiles_row.pack(fill="x", pady=(10, 0))
+        tiles_row.grid_columnconfigure(0, weight=5, uniform="tile_col")
+        tiles_row.grid_columnconfigure(1, weight=3, uniform="tile_col")
+        tiles_row.grid_columnconfigure(2, weight=3, uniform="tile_col")
 
-        date_bar = ctk.CTkFrame(self.main_container, fg_color="#16202a")
-        date_bar.pack(fill="x", padx=15, pady=(0, 4))
+        TILE_HEIGHT = 172
+
+        # --- KAFELEK 1: Dodawanie zadania (SZEROKI z osobnymi polami na priorytet, datę, # i lokalizację) ---
+        add_tile = ctk.CTkFrame(
+            tiles_row,
+            fg_color=JARVIS["glass_panel"],
+            corner_radius=10,
+            border_width=1,
+            border_color=JARVIS["border_cyan"],
+            height=TILE_HEIGHT,
+        )
+        add_tile.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        add_tile.pack_propagate(False)
+
         ctk.CTkLabel(
-            date_bar,
-            text=date_text,
+            add_tile,
+            text="➕  Dodaj nowe zadanie",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=JARVIS["cyan"],
+            anchor="w",
+        ).pack(fill="x", padx=14, pady=(10, 4))
+
+        # Wiersz 1: Tytuł zadania
+        self.quick_entry = ctk.CTkEntry(
+            add_tile,
+            placeholder_text="Wpisz treść / tytuł zadania...",
+            height=32,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
+        self.quick_entry.pack(fill="x", padx=14, pady=(0, 6))
+        self.quick_entry.bind("<Return>", lambda _: self.add_task())
+
+        # Wiersz 2: Osobne pola (Priorytet, Data/Termin, Tagi, Lokalizacja / Koordynaty)
+        fields_row = ctk.CTkFrame(add_tile, fg_color="transparent")
+        fields_row.pack(fill="x", padx=14, pady=(0, 6))
+
+        self.add_prio_menu = ctk.CTkOptionMenu(
+            fields_row,
+            values=["sredni", "wysoki", "niski"],
+            width=90,
+            height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color=JARVIS["input_bg"],
+            button_color=JARVIS["btn_cyan_bg"],
+            button_hover_color=JARVIS["btn_cyan_hover"],
+            text_color=JARVIS["text_ice"],
+        )
+        self.add_prio_menu.set("sredni")
+        self.add_prio_menu.pack(side="left", padx=(0, 4))
+
+        self.add_date_entry = ctk.CTkEntry(
+            fields_row,
+            placeholder_text="📅 Termin (@jutro)",
+            height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
+        self.add_date_entry.pack(side="left", fill="x", expand=True, padx=4)
+
+        self.add_tags_entry = ctk.CTkEntry(
+            fields_row,
+            placeholder_text="#tagi",
+            height=28,
+            width=95,
+            font=ctk.CTkFont(size=11),
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
+        self.add_tags_entry.pack(side="left", padx=4)
+
+        self.add_loc_entry = ctk.CTkEntry(
+            fields_row,
+            placeholder_text="📍 Koordynaty / miasto",
+            height=28,
+            font=ctk.CTkFont(size=11),
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
+        )
+        self.add_loc_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # Wiersz 3: Przycisk dodawania zadania
+        ctk.CTkButton(
+            add_tile,
+            text="+ Dodaj zadanie do planera",
+            height=30,
+            fg_color=JARVIS["btn_cyan_bg"],
+            hover_color=JARVIS["btn_cyan_hover"],
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            text_color=JARVIS["text_ice"],
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#85c1e9",
-        ).pack(side="left", padx=12, pady=5)
+            command=self.add_task,
+        ).pack(fill="x", padx=14, pady=(0, 10))
 
-        ctk.CTkSegmentedButton(
-            date_bar,
-            values=["Wszystkie", "Do zrobienia", "Po terminie", "Zrobione"],
-            variable=self.filter_mode,
-            command=lambda _: self.refresh_ui(),
-        ).pack(side="right", padx=10, pady=4)
+        # --- KAFELEK 2: Liga (WĘŻSZY) ---
+        league_tile = ctk.CTkFrame(
+            tiles_row,
+            fg_color=JARVIS["glass_panel"],
+            corner_radius=10,
+            border_width=1,
+            border_color=JARVIS["border_cyan"],
+            height=TILE_HEIGHT,
+        )
+        league_tile.grid(row=0, column=1, sticky="nsew", padx=4)
+        league_tile.pack_propagate(False)
 
-        # Panel Grywalizacji: Liga Systematyczności + Tygodniowy Cel + Streak
-        league_card = ctk.CTkFrame(self.main_container, fg_color="#1b2631", border_width=1, border_color="#2c3e50")
-        league_card.pack(fill="x", padx=15, pady=4)
-
-        left_gami = ctk.CTkFrame(league_card, fg_color="transparent")
-        left_gami.pack(side="left", fill="x", expand=True, padx=14, pady=8)
-
-        top_gami_row = ctk.CTkFrame(left_gami, fg_color="transparent")
-        top_gami_row.pack(fill="x")
+        league_header = ctk.CTkFrame(league_tile, fg_color="transparent")
+        league_header.pack(fill="x", padx=12, pady=(10, 2))
 
         self.league_badge = ctk.CTkLabel(
-            top_gami_row,
+            league_header,
             text="LIGA: BRĄZOWA",
             fg_color="#cd7f32",
             text_color="#111111",
             corner_radius=6,
-            padx=10,
+            padx=8,
             pady=2,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             cursor="hand2",
         )
         self.league_badge.pack(side="left")
         self.league_badge.bind("<Button-1>", lambda _: self.toggle_sidebar())
 
-        self.points_label = ctk.CTkLabel(
-            top_gami_row,
-            text="0 pkt",
-            font=ctk.CTkFont(size=14, weight="bold"),
+        self.sidebar_toggle_btn = ctk.CTkButton(
+            league_header,
+            text="☰",
+            width=32,
+            height=26,
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["cyan"],
+            font=ctk.CTkFont(size=15, weight="bold"),
+            command=self.toggle_sidebar,
         )
-        self.points_label.pack(side="left", padx=12)
+        self.sidebar_toggle_btn.pack(side="right")
+
+        stats_row = ctk.CTkFrame(league_tile, fg_color="transparent")
+        stats_row.pack(fill="x", padx=12, pady=(1, 1))
+
+        self.points_label = ctk.CTkLabel(
+            stats_row,
+            text="0 pkt",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=JARVIS["cyan"],
+        )
+        self.points_label.pack(side="left")
 
         self.streak_label = ctk.CTkLabel(
-            top_gami_row,
-            text="🔥 Streak: 0 tyg.",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="#f39c12",
+            stats_row,
+            text="🔥 0 tyg.",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=JARVIS["neon_amber"],
         )
-        self.streak_label.pack(side="left", padx=12)
+        self.streak_label.pack(side="right")
 
         self.goal_progress_label = ctk.CTkLabel(
-            top_gami_row,
+            league_tile,
             text="Cel tygodnia: 0 / 3",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=JARVIS["text_ice"],
+            anchor="w",
         )
-        self.goal_progress_label.pack(side="right", padx=6)
+        self.goal_progress_label.pack(fill="x", padx=12, pady=(1, 1))
 
-        self.goal_progress_bar = ctk.CTkProgressBar(left_gami, height=9)
-        self.goal_progress_bar.pack(fill="x", pady=(6, 3))
+        self.goal_progress_bar = ctk.CTkProgressBar(
+            league_tile,
+            height=7,
+            progress_color=JARVIS["cyan"],
+            fg_color=JARVIS["input_bg"],
+        )
+        self.goal_progress_bar.pack(fill="x", padx=12, pady=(0, 2))
         self.goal_progress_bar.set(0)
 
         self.gami_status_label = ctk.CTkLabel(
-            left_gami,
+            league_tile,
             text=self.last_event_text,
-            font=ctk.CTkFont(size=12),
-            text_color="#bdc3c7",
+            font=ctk.CTkFont(size=10),
+            text_color=JARVIS["text_muted"],
             anchor="w",
+            wraplength=270,
         )
-        self.gami_status_label.pack(fill="x")
+        self.gami_status_label.pack(fill="x", padx=12, pady=(0, 4))
 
-        right_gami = ctk.CTkFrame(league_card, fg_color="transparent")
-        right_gami.pack(side="right", padx=12, pady=8)
+        league_btns = ctk.CTkFrame(league_tile, fg_color="transparent")
+        league_btns.pack(fill="x", padx=12, pady=(0, 8))
 
         ctk.CTkButton(
-            right_gami,
+            league_btns,
             text="Zmień cel",
-            width=135,
-            height=26,
-            fg_color="#34495e",
+            height=24,
+            font=ctk.CTkFont(size=11),
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self.open_goal_dialog,
-        ).pack(pady=(0, 5))
+        ).pack(side="left", fill="x", expand=True, padx=(0, 3))
 
         ctk.CTkButton(
-            right_gami,
-            text="Symuluj koniec tyg.",
-            width=135,
-            height=26,
-            fg_color="#5d6d7e",
+            league_btns,
+            text="Symuluj",
+            height=24,
+            font=ctk.CTkFont(size=11),
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self._simulate_week,
-        ).pack()
+        ).pack(side="right", fill="x", expand=True, padx=(3, 0))
 
-        # Karta Smart Focus + Wbudowany Timer Pomodoro 25/5 min
-        self.focus_frame = ctk.CTkFrame(self.main_container, fg_color="#1f2d3d", border_width=1, border_color="#3498db")
-        self.focus_frame.pack(fill="x", padx=15, pady=4)
+        # --- KAFELEK 3: Smart Focus + Pomodoro (WĘŻSZY) ---
+        self.focus_frame = ctk.CTkFrame(
+            tiles_row,
+            fg_color=JARVIS["glass_panel_focus"],
+            corner_radius=10,
+            border_width=1,
+            border_color=JARVIS["cyan"],
+            height=TILE_HEIGHT,
+        )
+        self.focus_frame.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
+        self.focus_frame.pack_propagate(False)
+
+        ctk.CTkLabel(
+            self.focus_frame,
+            text="🎯  Smart Focus",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=JARVIS["cyan"],
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 2))
 
         self.focus_label = ctk.CTkLabel(
             self.focus_frame,
             text="",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             justify="left",
             anchor="w",
-            wraplength=650,
+            wraplength=270,
+            text_color=JARVIS["text_ice"],
         )
-        self.focus_label.pack(side="left", fill="x", expand=True, padx=(14, 8), pady=7)
+        self.focus_label.pack(fill="x", padx=12, pady=(0, 4))
 
-        # Panel Pomodoro po prawej stronie paska Smart Focus
-        pomo_box = ctk.CTkFrame(self.focus_frame, fg_color="#15202b", border_width=1, border_color="#e67e22", corner_radius=6)
-        pomo_box.pack(side="right", padx=(6, 10), pady=5)
+        pomo_box = ctk.CTkFrame(
+            self.focus_frame,
+            fg_color=JARVIS["input_bg"],
+            border_width=1,
+            border_color=JARVIS["neon_amber"],
+            corner_radius=6,
+        )
+        pomo_box.pack(fill="x", padx=12, pady=(0, 6))
 
         self.pomo_label = ctk.CTkLabel(
             pomo_box,
-            text="🍅 Skupienie: 25:00",
+            text="🍅 25:00",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#ecf0f1",
+            text_color=JARVIS["text_ice"],
         )
-        self.pomo_label.pack(side="left", padx=(10, 8), pady=4)
+        self.pomo_label.pack(side="left", padx=(8, 4), pady=4)
 
         self.pomo_start_btn = ctk.CTkButton(
             pomo_box,
             text="▶ Start",
-            width=72,
-            height=24,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#d35400",
-            hover_color="#a04000",
+            width=58,
+            height=22,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="#854600",
+            hover_color="#a85800",
+            border_width=1,
+            border_color=JARVIS["neon_amber"],
             command=self.toggle_pomodoro,
         )
-        self.pomo_start_btn.pack(side="left", padx=3, pady=4)
+        self.pomo_start_btn.pack(side="left", padx=2, pady=4)
 
         self.pomo_reset_btn = ctk.CTkButton(
             pomo_box,
             text="↺ Reset",
-            width=62,
-            height=24,
-            font=ctk.CTkFont(size=11),
-            fg_color="#34495e",
-            hover_color="#2c3e50",
+            width=54,
+            height=22,
+            font=ctk.CTkFont(size=10),
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self.reset_pomodoro,
         )
-        self.pomo_reset_btn.pack(side="left", padx=(2, 8), pady=4)
+        self.pomo_reset_btn.pack(side="left", padx=2, pady=4)
 
-        self.focus_done_btn = ctk.CTkButton(self.focus_frame, text="Odhacz teraz", width=105, height=28)
-        self.focus_done_btn.pack(side="right", padx=6, pady=7)
-
-        # Pasek Quick-Add
-        add_bar = ctk.CTkFrame(self.main_container)
-        add_bar.pack(fill="x", padx=15, pady=4)
-
-        self.quick_entry = ctk.CTkEntry(
-            add_bar,
-            placeholder_text="Wpisz zadanie, np. Kolokwium z sieci !wysoki @jutro #studia i wciśnij Enter...",
-            height=34,
+        self.focus_done_btn = ctk.CTkButton(
+            self.focus_frame,
+            text="✓ Odhacz zadanie",
+            height=26,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#006655",
+            hover_color="#008870",
+            border_width=1,
+            border_color=JARVIS["neon_green"],
+            text_color="#ffffff",
         )
-        self.quick_entry.pack(side="left", fill="x", expand=True, padx=(10, 8), pady=7)
-        self.quick_entry.bind("<Return>", lambda _: self.add_task())
+        self.focus_done_btn.pack(fill="x", padx=12, pady=(0, 8))
 
-        ctk.CTkButton(add_bar, text="+ Dodaj", width=100, height=34, command=self.add_task).pack(side="right", padx=(0, 10))
-
-        # Pasek wyszukiwania na żywo i filtrowania po wszystkich parametrach
-        filter_bar = ctk.CTkFrame(self.main_container, fg_color="#1b2631")
-        filter_bar.pack(fill="x", padx=15, pady=(2, 6))
+        # === SEKCJA: Wyszukiwanie + Filtry ===
+        filter_bar = ctk.CTkFrame(
+            self.content_frame,
+            fg_color=JARVIS["glass_panel"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            corner_radius=10,
+        )
+        filter_bar.pack(fill="x", pady=(10, 0))
 
         self.search_entry = ctk.CTkEntry(
             filter_bar,
             textvariable=self.search_var,
-            placeholder_text="🔍 Szukaj po tytule, opisie, ID, dacie lub #tagu...",
-            height=30,
+            placeholder_text="🔍 Szukaj po tytule, opisie, ID, dacie, tagu lub lokalizacji...",
+            height=32,
+            width=270,
+            fg_color=JARVIS["input_bg"],
+            border_color=JARVIS["input_border"],
+            text_color=JARVIS["text_ice"],
         )
-        self.search_entry.pack(side="left", fill="x", expand=True, padx=(10, 6), pady=6)
+        self.search_entry.pack(side="left", padx=(12, 6), pady=8)
+
+        ctk.CTkSegmentedButton(
+            filter_bar,
+            values=["Wszystkie", "Do zrobienia", "Po terminie", "Zrobione"],
+            variable=self.filter_mode,
+            command=lambda _: self.refresh_ui(),
+            selected_color=JARVIS["btn_cyan_bg"],
+            selected_hover_color=JARVIS["btn_cyan_hover"],
+            unselected_color=JARVIS["btn_glass_bg"],
+            unselected_hover_color=JARVIS["btn_glass_hover"],
+            text_color=JARVIS["text_ice"],
+        ).pack(side="left", padx=6, pady=8)
 
         self.prio_filter_menu = ctk.CTkOptionMenu(
             filter_bar,
             values=["Priorytet: Wszystkie", "wysoki", "sredni", "niski"],
             variable=self.prio_filter_var,
-            width=155,
+            width=150,
             height=30,
             command=lambda _: self.refresh_ui(),
+            fg_color=JARVIS["input_bg"],
+            button_color=JARVIS["btn_cyan_bg"],
+            button_hover_color=JARVIS["btn_cyan_hover"],
+            text_color=JARVIS["text_ice"],
         )
-        self.prio_filter_menu.pack(side="left", padx=4, pady=6)
+        self.prio_filter_menu.pack(side="left", padx=4, pady=8)
 
         self.date_filter_menu = ctk.CTkOptionMenu(
             filter_bar,
             values=["Termin: Wszystkie", "Na dziś", "Po terminie", "Z terminem", "Bez terminu (null)"],
             variable=self.date_filter_var,
-            width=165,
+            width=160,
             height=30,
             command=lambda _: self.refresh_ui(),
+            fg_color=JARVIS["input_bg"],
+            button_color=JARVIS["btn_cyan_bg"],
+            button_hover_color=JARVIS["btn_cyan_hover"],
+            text_color=JARVIS["text_ice"],
         )
-        self.date_filter_menu.pack(side="left", padx=4, pady=6)
+        self.date_filter_menu.pack(side="left", padx=4, pady=8)
 
         self.tag_filter_menu = ctk.CTkOptionMenu(
             filter_bar,
             values=["Tag: Wszystkie"],
             variable=self.tag_filter_var,
-            width=145,
+            width=140,
             height=30,
             command=lambda _: self.refresh_ui(),
+            fg_color=JARVIS["input_bg"],
+            button_color=JARVIS["btn_cyan_bg"],
+            button_hover_color=JARVIS["btn_cyan_hover"],
+            text_color=JARVIS["text_ice"],
         )
-        self.tag_filter_menu.pack(side="left", padx=4, pady=6)
+        self.tag_filter_menu.pack(side="left", padx=4, pady=8)
 
         ctk.CTkButton(
             filter_bar,
             text="✕ Reset",
-            width=70,
+            width=65,
             height=30,
-            fg_color="#5d6d7e",
+            fg_color=JARVIS["btn_glass_bg"],
+            hover_color=JARVIS["btn_glass_hover"],
+            border_width=1,
+            border_color=JARVIS["border_subtle"],
+            text_color=JARVIS["text_ice"],
             command=self.reset_filters,
-        ).pack(side="left", padx=(4, 10), pady=6)
+        ).pack(side="left", padx=(4, 12), pady=8)
 
-        # Kontener roboczy (mieści Tablicę Kanban, Kalendarz albo Listę)
-        self.workspace_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.workspace_frame.pack(fill="both", expand=True, padx=15, pady=(2, 12))
+        # === WYRÓŻNIAJĄCY SIĘ, WIĘKSZY PRZEŁĄCZNIK WIDOKU NAD SAMYM WIDOKIEM ===
+        view_switcher_box = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        view_switcher_box.pack(fill="x", pady=(10, 4))
+
+        self.view_switcher = ctk.CTkSegmentedButton(
+            view_switcher_box,
+            values=["📋 Tablica", "📅 Kalendarz", "📝 Lista", "🌍 Globus 3D"],
+            variable=self.view_mode,
+            command=lambda _: self.refresh_ui(),
+            height=38,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            selected_color=JARVIS["btn_cyan_bg"],
+            selected_hover_color=JARVIS["btn_cyan_hover"],
+            unselected_color=JARVIS["glass_panel"],
+            unselected_hover_color=JARVIS["glass_panel_alt"],
+            text_color=JARVIS["text_ice"],
+            corner_radius=8,
+        )
+        self.view_switcher.pack(anchor="center")
+
+        # === KONTENER ROBOCZY (Tablica Kanban / Kalendarz / Lista / Globus 3D) ===
+        self.workspace_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        self.workspace_frame.pack(fill="both", expand=True, pady=(2, 14))
 
         self.kanban_board = KanbanBoardFrame(
             self.workspace_frame,
@@ -753,6 +1162,14 @@ class SmartPlannerApp(ctk.CTk):
         )
 
         self.task_list_frame = ctk.CTkScrollableFrame(self.workspace_frame)
+
+        self.globe_view = GlobeViewFrame(
+            self.workspace_frame,
+            on_toggle_task=self.toggle_task,
+            on_edit_task=self.edit_task,
+            on_delete_task=self.delete_task,
+            on_add_with_loc=self.quick_add_with_loc,
+        )
 
     def _render_sidebar(self):
         pts = self.gamification.state["points"]
@@ -774,9 +1191,9 @@ class SmartPlannerApp(ctk.CTk):
 
             card = ctk.CTkFrame(
                 self.sb_leagues_scroll,
-                fg_color="#1f2f3f" if is_current else ("#182430" if is_unlocked else "#141c24"),
+                fg_color=JARVIS["glass_panel_alt"] if is_current else (JARVIS["glass_panel"] if is_unlocked else JARVIS["input_bg"]),
                 border_width=2 if is_current else 1,
-                border_color=color if is_current else ("#34495e" if is_unlocked else "#222d38"),
+                border_color=color if is_current else (JARVIS["border_cyan"] if is_unlocked else JARVIS["border_subtle"]),
                 corner_radius=8,
             )
             card.pack(fill="x", pady=5, padx=4)
@@ -829,22 +1246,63 @@ class SmartPlannerApp(ctk.CTk):
         tasks = self.data.get("zadania", [])
         return max((int(t["id"]) for t in tasks), default=0) + 1
 
+    def quick_add_with_loc(self, lat: float, lon: float):
+        if hasattr(self, "add_loc_entry"):
+            self.add_loc_entry.delete(0, "end")
+            self.add_loc_entry.insert(0, f"{lat:.2f}, {lon:.2f}")
+        if hasattr(self, "quick_entry"):
+            self.quick_entry.focus()
+
     def add_task(self):
         raw = self.quick_entry.get().strip()
         if not raw:
             return
         parsed = parse_quick_add(raw)
+
+        # Osobne pola formularza mają pierwszeństwo i wzbogacają zadanie
+        prio = self.add_prio_menu.get() if hasattr(self, "add_prio_menu") else parsed["priorytet"]
+        raw_date = self.add_date_entry.get().strip() if hasattr(self, "add_date_entry") else ""
+        if raw_date:
+            today = date.today()
+            if raw_date.lower() in ("dzis", "dziś"):
+                termin = today.isoformat()
+            elif raw_date.lower() == "jutro":
+                termin = (today + timedelta(days=1)).isoformat()
+            else:
+                termin = raw_date
+        else:
+            termin = parsed["termin"]
+
+        raw_tags = self.add_tags_entry.get().strip() if hasattr(self, "add_tags_entry") else ""
+        explicit_tags = [t.strip().lstrip("#") for t in raw_tags.split(",") if t.strip()]
+        all_tags = list(dict.fromkeys(parsed["tagi"] + explicit_tags))
+
+        raw_loc = self.add_loc_entry.get().strip() if hasattr(self, "add_loc_entry") else ""
+        lokalizacja = raw_loc or parsed.get("lokalizacja")
+
+        tid = self._next_id()
         new_task = {
-            "id": self._next_id(),
+            "id": tid,
             "tytul": parsed["tytul"],
             "opis": "",
-            "termin": parsed["termin"],
-            "priorytet": parsed["priorytet"],
+            "termin": termin,
+            "priorytet": prio,
             "wykonane": False,
-            "tagi": parsed["tagi"],
+            "tagi": all_tags,
+            "lokalizacja": lokalizacja,
         }
         self.data["zadania"].append(new_task)
+        if lokalizacja:
+            self.locations[tid] = lokalizacja
+            save_locations(self.locations, self.locations_path)
+
         self.quick_entry.delete(0, "end")
+        if hasattr(self, "add_date_entry"):
+            self.add_date_entry.delete(0, "end")
+        if hasattr(self, "add_tags_entry"):
+            self.add_tags_entry.delete(0, "end")
+        if hasattr(self, "add_loc_entry"):
+            self.add_loc_entry.delete(0, "end")
         self.refresh_ui()
 
     def quick_add_in_column(self, col_key: str):
@@ -858,16 +1316,23 @@ class SmartPlannerApp(ctk.CTk):
             return
         parsed = parse_quick_add(raw)
         is_done_col = (col_key == "done")
+        tid = self._next_id()
+        loc = parsed.get("lokalizacja")
         new_task = {
-            "id": self._next_id(),
+            "id": tid,
             "tytul": parsed["tytul"],
             "opis": "",
             "termin": parsed["termin"] if is_done_col else (parsed["termin"] or target_date_for_column(col_key)),
             "priorytet": parsed["priorytet"],
             "wykonane": is_done_col,
             "tagi": parsed["tagi"],
+            "lokalizacja": loc,
         }
         self.data["zadania"].append(new_task)
+        if loc:
+            self.locations[tid] = loc
+            save_locations(self.locations, self.locations_path)
+
         if is_done_col:
             _, feedback = self.gamification.record_task_completed(new_task)
             self.last_event_text = feedback
@@ -901,16 +1366,23 @@ class SmartPlannerApp(ctk.CTk):
         if not raw or not raw.strip():
             return
         parsed = parse_quick_add(raw)
+        tid = self._next_id()
+        loc = parsed.get("lokalizacja")
         new_task = {
-            "id": self._next_id(),
+            "id": tid,
             "tytul": parsed["tytul"],
             "opis": "",
             "termin": parsed["termin"] or date_str,
             "priorytet": parsed["priorytet"],
             "wykonane": False,
             "tagi": parsed["tagi"],
+            "lokalizacja": loc,
         }
         self.data["zadania"].append(new_task)
+        if loc:
+            self.locations[tid] = loc
+            save_locations(self.locations, self.locations_path)
+
         self.last_event_text = f"Dodano zadanie „{new_task['tytul']}” na dzień {new_task['termin']}."
         self.refresh_ui()
 
@@ -928,6 +1400,9 @@ class SmartPlannerApp(ctk.CTk):
 
     def delete_task(self, task_id: int):
         self.data["zadania"] = [t for t in self.data["zadania"] if t["id"] != task_id]
+        if int(task_id) in self.locations:
+            self.locations.pop(int(task_id), None)
+            save_locations(self.locations, self.locations_path)
         self.refresh_ui()
 
     def edit_task(self, task: dict):
@@ -963,6 +1438,7 @@ class SmartPlannerApp(ctk.CTk):
 
         self.data = new_data
         self.current_file = path
+        self._link_locations_to_tasks()
         self.gamification.reset_weekly_progress()
         self.last_event_text = f"Wczytano nową listę ({Path(path).name}) — postęp tygodniowy został wyzerowany."
         self.refresh_ui()
@@ -972,6 +1448,7 @@ class SmartPlannerApp(ctk.CTk):
             self.export_json()
             return
         save_tasks(self.current_file, self.data)
+        save_locations(self.locations, self.locations_path)
         messagebox.showinfo("Zapisano", f"Zapisano zmiany w pliku:\n{self.current_file}")
 
     def export_json(self):
@@ -983,6 +1460,7 @@ class SmartPlannerApp(ctk.CTk):
         if not path:
             return
         save_tasks(path, self.data)
+        save_locations(self.locations, self.locations_path)
         self.current_file = path
         self.refresh_ui()
         messagebox.showinfo("Zapisano", f"Wyeksportowano zadania do:\n{path}")
@@ -1039,6 +1517,7 @@ class SmartPlannerApp(ctk.CTk):
                     str(termin_val or "").lower(),
                     t.get("priorytet", "").lower(),
                     " ".join(t.get("tagi", [])).lower(),
+                    str(t.get("lokalizacja", "")).lower(),
                 ])
                 if query not in searchable and q_no_hash not in searchable:
                     continue
@@ -1059,9 +1538,9 @@ class SmartPlannerApp(ctk.CTk):
         self.league_badge.configure(text=f"🏆 LIGA: {league['name'].upper()}", fg_color=league["color"])
 
         if league["next_name"]:
-            pts_txt = f"{st['points']} pkt (brakuje {league['pts_to_next']} pkt do ligi {league['next_name']})"
+            pts_txt = f"{st['points']} pkt  •  -{league['pts_to_next']} do {league['next_name']}"
         else:
-            pts_txt = f"{st['points']} pkt (Najwyższa liga!)"
+            pts_txt = f"{st['points']} pkt  •  Max liga!"
         self.points_label.configure(text=pts_txt)
         self.streak_label.configure(text=f"🔥 Streak: {st['streak']} tyg.")
 
@@ -1075,10 +1554,10 @@ class SmartPlannerApp(ctk.CTk):
         best_task, reason = get_smart_focus_task(self.data["zadania"])
         self.current_focus_task = best_task
         if best_task:
-            self.focus_label.configure(text=f"SMART FOCUS: {best_task['tytul']}  •  {reason}")
+            self.focus_label.configure(text=f"{best_task['tytul']}\n{reason}")
             self.focus_done_btn.configure(state="normal", command=lambda tid=best_task["id"]: self.toggle_task(tid))
         else:
-            self.focus_label.configure(text=f"SMART FOCUS: {reason}")
+            self.focus_label.configure(text=reason)
             self.focus_done_btn.configure(state="disabled")
 
         # 4. Odśwież listę dostępnych tagów w menu filtrowania
@@ -1090,23 +1569,25 @@ class SmartPlannerApp(ctk.CTk):
 
         filtered_tasks = self._get_filtered_tasks()
 
-        # 5. Wyświetl wybrany widok: Tablica Kanban, Kalendarz lub Lista
+        # 5. Wyświetl wybrany widok: Tablica Kanban, Kalendarz, Lista lub Globus 3D
         current_view = self.view_mode.get()
-        if current_view == "Tablica":
-            self.task_list_frame.pack_forget()
-            self.calendar_view.pack_forget()
+        self.task_list_frame.pack_forget()
+        self.calendar_view.pack_forget()
+        self.kanban_board.pack_forget()
+        self.globe_view.pack_forget()
+
+        if "Tablica" in current_view:
             self.kanban_board.pack(fill="both", expand=True)
             self.kanban_board.render(filtered_tasks)
-        elif current_view == "Kalendarz":
-            self.task_list_frame.pack_forget()
-            self.kanban_board.pack_forget()
+        elif "Kalendarz" in current_view:
             self.calendar_view.pack(fill="both", expand=True)
             self.calendar_view.render(filtered_tasks)
-        else:
-            self.kanban_board.pack_forget()
-            self.calendar_view.pack_forget()
+        elif "Lista" in current_view:
             self.task_list_frame.pack(fill="both", expand=True)
             self._render_list_view(filtered_tasks)
+        elif "Globus" in current_view:
+            self.globe_view.pack(fill="both", expand=True)
+            self.globe_view.render(filtered_tasks)
 
     def _render_list_view(self, tasks: list[dict]):
         for widget in self.task_list_frame.winfo_children():
@@ -1117,12 +1598,18 @@ class SmartPlannerApp(ctk.CTk):
                 self.task_list_frame,
                 text="Brak zadań spełniających wybrane kryteria filtrowania.",
                 font=ctk.CTkFont(size=14),
-                text_color="#888888",
+                text_color=JARVIS["text_muted"],
             ).pack(pady=30)
             return
 
         for t in tasks:
-            card = ctk.CTkFrame(self.task_list_frame)
+            card = ctk.CTkFrame(
+                self.task_list_frame,
+                fg_color=JARVIS["glass_panel"],
+                border_width=1,
+                border_color=JARVIS["border_cyan"] if not t["wykonane"] else JARVIS["neon_green"],
+                corner_radius=8,
+            )
             card.pack(fill="x", pady=4, padx=4)
 
             cb = ctk.CTkCheckBox(
@@ -1130,6 +1617,8 @@ class SmartPlannerApp(ctk.CTk):
                 text="",
                 width=24,
                 command=lambda tid=t["id"]: self.toggle_task(tid),
+                fg_color=JARVIS["cyan"],
+                hover_color=JARVIS["cyan_dim"],
             )
             if t["wykonane"]:
                 cb.select()
@@ -1142,8 +1631,8 @@ class SmartPlannerApp(ctk.CTk):
             ctk.CTkLabel(
                 info_frame,
                 text=title_text,
-                font=ctk.CTkFont(size=15, weight="bold"),
-                text_color="#888888" if t["wykonane"] else "#ffffff",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                text_color=JARVIS["text_muted"] if t["wykonane"] else JARVIS["text_ice"],
             ).pack(anchor="w")
 
             pts_value = PRIORITY_POINTS.get(t["priorytet"], 4)
@@ -1154,20 +1643,23 @@ class SmartPlannerApp(ctk.CTk):
                 meta_parts.append(f"Termin: {termin_val}{overdue_tag}")
             if t.get("tagi"):
                 meta_parts.append("Tagi: " + ", ".join(f"#{tag}" for tag in t["tagi"]))
+            if t.get("lokalizacja"):
+                meta_parts.append(f"Lokalizacja: 📍 {t['lokalizacja']}")
             if t.get("opis"):
                 meta_parts.append(f"Opis: {t['opis']}")
 
             ctk.CTkLabel(
                 info_frame,
                 text="  |  ".join(meta_parts),
-                font=ctk.CTkFont(size=12),
-                text_color="#e74c3c" if is_overdue(t) else "#aaaaaa",
+                font=ctk.CTkFont(size=11),
+                text_color=JARVIS["neon_red"] if is_overdue(t) else JARVIS["cyan_dim"],
             ).pack(anchor="w")
 
             prio_badge = ctk.CTkLabel(
                 card,
                 text=t["priorytet"].upper(),
                 fg_color=PRIO_COLORS.get(t["priorytet"], "#555555"),
+                text_color="#111111" if t["priorytet"] in ("sredni", "niski") else "#ffffff",
                 corner_radius=6,
                 width=70,
                 font=ctk.CTkFont(size=11, weight="bold"),
@@ -1178,8 +1670,10 @@ class SmartPlannerApp(ctk.CTk):
                 card,
                 text="Usuń",
                 width=65,
-                fg_color="#c0392b",
-                hover_color="#962d22",
+                fg_color="#5a1823",
+                hover_color="#7a2030",
+                border_width=1,
+                border_color=JARVIS["neon_red"],
                 command=lambda tid=t["id"]: self.delete_task(tid),
             ).pack(side="right", padx=4)
 
@@ -1187,6 +1681,11 @@ class SmartPlannerApp(ctk.CTk):
                 card,
                 text="Edytuj",
                 width=65,
+                fg_color=JARVIS["btn_glass_bg"],
+                hover_color=JARVIS["btn_glass_hover"],
+                border_width=1,
+                border_color=JARVIS["border_subtle"],
+                text_color=JARVIS["text_ice"],
                 command=lambda task=t: self.edit_task(task),
             ).pack(side="right", padx=4)
 
